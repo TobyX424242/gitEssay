@@ -36,6 +36,7 @@ import PlaygroundNodes from './nodes/PlaygroundNodes';
 import {PlaygroundDOMRenderExtension} from './PlaygroundDOMRenderExtension';
 import {PlaygroundAutoLinkExtension} from './plugins/AutoLinkExtension';
 import {CodeHighlightExtension} from './plugins/CodeHighlightExtension';
+import {CitationsExtension} from './plugins/CitationsExtension';
 import {CollapsibleExtension} from './plugins/CollapsibleExtension';
 import {DragDropPasteExtension} from './plugins/DragDropPasteExtension';
 import {EquationsExtension} from './plugins/EquationsExtension';
@@ -72,6 +73,7 @@ const PlaygroundRichTextExtension = /* @__PURE__ */ defineExtension({
     CheckListExtension,
     PlaygroundMarkdownShortcutsExtension,
     EquationsExtension,
+    CitationsExtension,
   ],
   name: 'gitEssay/RichText',
 });

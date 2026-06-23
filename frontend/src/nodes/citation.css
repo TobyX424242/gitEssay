@@ -1,0 +1,37 @@
+/* gitEssay — citation badge. Follows the --ge palette where possible. */
+.citation-node {
+  user-select: none;
+}
+.citation-badge {
+  background: rgba(60, 132, 244, 0.14);
+  color: #3c84f4;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 0.9em;
+  font-weight: 500;
+  cursor: default;
+  white-space: nowrap;
+}
+.citation-badge:hover {
+  background: rgba(60, 132, 244, 0.22);
+}
+.citation-input {
+  font-size: 0.9em;
+  border: 1px solid #3c84f4;
+  border-radius: 4px;
+  padding: 0 4px;
+  background: #fff;
+  color: #1a1a1a;
+  outline: none;
+}
+[data-theme='dark'] .citation-badge {
+  background: rgba(110, 168, 255, 0.2);
+  color: #8ab4ff;
+}
+[data-theme='dark'] .citation-badge:hover {
+  background: rgba(110, 168, 255, 0.3);
+}
+[data-theme='dark'] .citation-input {
+  background: #1c1f26;
+  color: #d8dae0;
+}

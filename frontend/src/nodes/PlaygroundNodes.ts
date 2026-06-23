@@ -20,6 +20,7 @@ import {TableCellNode, TableNode, TableRowNode} from '@lexical/table';
 import {CollapsibleContainerNode} from '../plugins/CollapsibleExtension/CollapsibleContainerNode';
 import {CollapsibleContentNode} from '../plugins/CollapsibleExtension/CollapsibleContentNode';
 import {CollapsibleTitleNode} from '../plugins/CollapsibleExtension/CollapsibleTitleNode';
+import {CitationNode} from './CitationNode';
 import {EquationNode} from './EquationNode';
 import {ImageNode} from './ImageNode';
 import {PageBreakNode} from './PageBreakNode';
@@ -39,6 +40,7 @@ const PlaygroundNodes: Klass<LexicalNode>[] = [
   OverflowNode,
   ImageNode,
   EquationNode,
+  CitationNode,
   HorizontalRuleNode,
   CollapsibleContainerNode,
   CollapsibleContentNode,

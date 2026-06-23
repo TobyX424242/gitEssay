@@ -36,6 +36,7 @@ import {useCallback, useMemo, useState} from 'react';
 
 import useModal from '../../hooks/useModal';
 import {INSERT_COLLAPSIBLE_COMMAND} from '../CollapsibleExtension';
+import {INSERT_CITATION_COMMAND, InsertCitationDialog} from '../CitationsExtension';
 import {InsertEquationDialog} from '../EquationsExtension';
 import {INSERT_IMAGE_COMMAND, InsertImageDialog} from '../ImagesExtension';
 import {INSERT_PAGE_BREAK} from '../PageBreakExtension';
@@ -228,6 +229,26 @@ export function getBaseOptions(editor: LexicalEditor, showModal: ShowModal) {
         showModal('Insert Equation', onClose => (
           <InsertEquationDialog activeEditor={editor} onClose={onClose} />
         )),
+    }),
+    new ComponentPickerOption('Citation', {
+      icon: <i className="icon quote" />,
+      keywords: ['citation', 'cite', 'reference', 'ref'],
+      onSelect: () => {
+        let selText: string | null = null;
+        editor.getEditorState().read(() => {
+          const sel = $getSelection();
+          if ($isRangeSelection(sel) && !sel.isCollapsed()) {
+            selText = sel.getTextContent();
+          }
+        });
+        if (selText && selText.trim()) {
+          editor.dispatchCommand(INSERT_CITATION_COMMAND, {label: selText});
+        } else {
+          showModal('Insert citation', onClose => (
+            <InsertCitationDialog activeEditor={editor} onClose={onClose} />
+          ));
+        }
+      },
     }),
     new ComponentPickerOption('Image', {
       icon: <i className="icon image" />,

@@ -24,6 +24,7 @@ interface SerNode {
   tag?: string;
   direction?: 'ltr' | 'rtl' | null;
   indent?: number;
+  label?: string;
   children?: SerNode[];
 }
 
@@ -51,6 +52,10 @@ function collectRuns(node: SerNode | undefined, linkUrl: string | null, runs: Te
   }
   if (node.type === 'image') {
     runs.push({text: ' ⟨IMG⟩ ', format: 0, style: '', link: null});
+    return;
+  }
+  if (node.type === 'citation') {
+    runs.push({text: node.label ?? '', format: 0, style: '', link: null});
     return;
   }
   if (Array.isArray(node.children)) {

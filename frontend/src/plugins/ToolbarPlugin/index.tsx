@@ -79,6 +79,7 @@ import {isKeyboardInput} from '../../utils/focusUtils';
 import {getSelectedNode} from '../../utils/getSelectedNode';
 import {sanitizeUrl} from '../../utils/url';
 import {INSERT_COLLAPSIBLE_COMMAND} from '../CollapsibleExtension';
+import {INSERT_CITATION_COMMAND, InsertCitationDialog} from '../CitationsExtension';
 import {InsertEquationDialog} from '../EquationsExtension';
 import {InsertImageDialog} from '../ImagesExtension';
 import {INSERT_PAGE_BREAK} from '../PageBreakExtension';
@@ -1324,6 +1325,32 @@ export default function ToolbarPlugin({
                   className="item">
                   <i className="icon equation" />
                   <span className="text">Equation</span>
+                </DropDownItem>
+                <DropDownItem
+                  onClick={() => {
+                    let selText: string | null = null;
+                    activeEditor.getEditorState().read(() => {
+                      const sel = $getSelection();
+                      if ($isRangeSelection(sel) && !sel.isCollapsed()) {
+                        selText = sel.getTextContent();
+                      }
+                    });
+                    if (selText && selText.trim()) {
+                      activeEditor.dispatchCommand(INSERT_CITATION_COMMAND, {
+                        label: selText,
+                      });
+                    } else {
+                      showModal('Insert citation', onClose => (
+                        <InsertCitationDialog
+                          activeEditor={activeEditor}
+                          onClose={onClose}
+                        />
+                      ));
+                    }
+                  }}
+                  className="item">
+                  <i className="icon quote" />
+                  <span className="text">Citation</span>
                 </DropDownItem>
                 <DropDownItem
                   onClick={() =>
