@@ -1,0 +1,227 @@
+/**
+ * gitEssay — dark mode + theme toggle styles.
+ *
+ * Strategy: light mode is the playground's existing CSS, UNTOUCHED. Dark mode
+ * is a purely ADDITIVE override layer scoped under [data-theme="dark"], whose
+ * selectors carry higher specificity (the attribute) so they win regardless of
+ * import order. The toolbar/action icons are SVG background-images with
+ * fill="currentColor" that render BLACK as bg-images — so in dark mode we
+ * `filter: invert(1)` the <i> chrome icons to make them visible.
+ */
+
+/* --- App header (new chrome, styled for both modes) --- */
+.app-header {
+  max-width: 1128px;
+  margin: 20px auto 0;
+  padding: 10px 4px;
+  display: flex;
+  align-items: center;
+}
+.app-title {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #333;
+}
+
+/* --- Theme toggle button (bottom-left corner) --- */
+.theme-toggle {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 200;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid #ccc;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.theme-toggle:hover {
+  background: #eee;
+}
+
+/* ===================================================================== */
+/* DARK MODE                                                              */
+/* ===================================================================== */
+:root {
+  color-scheme: light;
+  /* Light palette — mirrors the playground's existing surface colors so new
+     components using these tokens match the original light look. */
+  --ge-bg: #eee;
+  --ge-surface: #fff;
+  --ge-surface-2: #f6f7f9;
+  --ge-border: #e2e3e7;
+  --ge-text: #1a1a1a;
+  --ge-text-muted: #5a5a5a;
+  --ge-accent: #3c84f4;
+}
+[data-theme='dark'] {
+  color-scheme: dark;
+  --ge-bg: #15171c;
+  --ge-surface: #1c1f26;
+  --ge-surface-2: #262a33;
+  --ge-border: #333a47;
+  --ge-text: #d8dae0;
+  --ge-text-muted: #9aa0ab;
+  --ge-accent: #6ea8ff;
+}
+
+/* App background + base text */
+[data-theme='dark'] body,
+[data-theme='dark'] #root {
+  background: var(--ge-bg);
+  color: var(--ge-text);
+}
+
+/* Header */
+[data-theme='dark'] .app-header {
+  border-bottom: 1px solid var(--ge-border);
+}
+[data-theme='dark'] .app-title {
+  color: var(--ge-text);
+}
+
+/* Editor surfaces */
+[data-theme='dark'] .editor-shell {
+  color: var(--ge-text);
+}
+[data-theme='dark'] .editor-shell .editor-container,
+[data-theme='dark'] .editor-scroller,
+[data-theme='dark'] .editor {
+  background: var(--ge-surface);
+  color: var(--ge-text);
+}
+
+/* Toolbar */
+[data-theme='dark'] .toolbar {
+  background: var(--ge-surface-2);
+  border-bottom: 1px solid var(--ge-border);
+}
+[data-theme='dark'] .toolbar .toolbar-item,
+[data-theme='dark'] .toolbar .button {
+  color: var(--ge-text);
+  background: transparent;
+}
+[data-theme='dark'] .toolbar .toolbar-item.active,
+[data-theme='dark'] .toolbar .button.active {
+  background: var(--ge-surface);
+}
+
+/* Dropdowns, slash-menu, floating popovers */
+[data-theme='dark'] .dropdown,
+[data-theme='dark'] .typeahead-popover,
+[data-theme='dark'] .link-editor,
+[data-theme='dark'] .floating-text-format-popup {
+  background: var(--ge-surface-2);
+  color: var(--ge-text);
+  border: 1px solid var(--ge-border);
+}
+[data-theme='dark'] .dropdown .item,
+[data-theme='dark'] .typeahead-popover li {
+  color: var(--ge-text);
+}
+[data-theme='dark'] .dropdown .item:hover,
+[data-theme='dark'] .dropdown .item.dropdown-item-active,
+[data-theme='dark'] .typeahead-popover li.selected,
+[data-theme='dark'] .typeahead-popover li.active,
+[data-theme='dark'] .popup-item:hover {
+  background: var(--ge-surface);
+}
+[data-theme='dark'] .link-editor .link-input,
+[data-theme='dark'] .link-editor input {
+  color: var(--ge-text);
+  background: var(--ge-surface);
+}
+[data-theme='dark'] .popup-item {
+  color: var(--ge-text);
+}
+[data-theme='dark'] .popup-item.active {
+  background: var(--ge-surface);
+}
+
+/* Actions (bottom-right) */
+[data-theme='dark'] .action-button {
+  background-color: var(--ge-surface-2);
+  color: var(--ge-text);
+}
+[data-theme='dark'] .action-button:hover {
+  background-color: var(--ge-surface);
+}
+[data-theme='dark'] .action-button[data-active='true'] {
+  filter: none;
+  background-color: var(--ge-accent);
+  color: #0b0d12;
+}
+/* Disabled action buttons (e.g. Clear when the editor is empty): the base
+   `button.action-button:disabled { background:#eee }` wins on specificity over
+   our dark `.action-button` rule, leaving a LIGHT button under the inverted
+   (white) trash icon → invisible. Repaint the disabled button dark and dim it
+   to preserve the disabled cue. */
+[data-theme='dark'] button.action-button:disabled {
+  background: var(--ge-surface-2);
+  opacity: 0.5;
+}
+
+/* Chrome icons: SVG bg-images render black → invert to white. */
+[data-theme='dark'] .toolbar i,
+[data-theme='dark'] .dropdown i,
+[data-theme='dark'] .actions i,
+[data-theme='dark'] .typeahead-popover i,
+[data-theme='dark'] .link-editor i,
+[data-theme='dark'] .floating-text-format-popup i {
+  filter: invert(1);
+}
+
+/* Editor content theme */
+[data-theme='dark'] .PlaygroundEditorTheme__code {
+  background-color: var(--ge-surface);
+  color: var(--ge-text);
+}
+[data-theme='dark'] .PlaygroundEditorTheme__h1 {
+  color: #f0f1f5;
+}
+[data-theme='dark'] .PlaygroundEditorTheme__h2,
+[data-theme='dark'] .PlaygroundEditorTheme__quote {
+  color: var(--ge-text-muted);
+}
+[data-theme='dark'] .PlaygroundEditorTheme__quote {
+  border-left-color: var(--ge-border);
+}
+
+/* Modals + dialogs */
+[data-theme='dark'] .Modal__overlay {
+  background: rgba(0, 0, 0, 0.6);
+}
+[data-theme='dark'] .Modal__modal,
+[data-theme='dark'] .Modal__content {
+  background: var(--ge-surface-2);
+  color: var(--ge-text);
+  border: 1px solid var(--ge-border);
+}
+[data-theme='dark'] .Modal__title {
+  color: var(--ge-text);
+}
+
+/* Theme toggle in dark */
+[data-theme='dark'] .theme-toggle {
+  background: var(--ge-surface-2);
+  color: var(--ge-text);
+  border-color: var(--ge-border);
+}
+[data-theme='dark'] .theme-toggle:hover {
+  background: var(--ge-surface);
+}
+
+/* Native selection + scrollbars follow the scheme */
+[data-theme='dark'] ::selection {
+  background: rgba(110, 168, 255, 0.3);
+}
