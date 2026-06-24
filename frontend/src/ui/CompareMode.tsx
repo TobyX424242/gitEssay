@@ -22,6 +22,7 @@ import {useCheckpoints} from '../checkpoints/useCheckpoints';
 import {diffBlocks} from '../diff/diff';
 import DiffView from '../diff/DiffView';
 import {tokenizeBlocks} from '../diff/tokenize';
+import {useScrollTrap} from './useScrollTrap';
 
 interface CompareModeValue {
   fromId: string | null;
@@ -110,9 +111,17 @@ export function CompareSurface(): JSX.Element | null {
   const {fromId, toId, active, setFrom, setTo, exit} = useCompareMode();
   const {checkpoints} = useCheckpoints(editor);
 
-  // Read-only while comparing; editable again on exit.
+  // Read-only while comparing; editable again on exit. Lock the page scroll so
+  // the compare surface's own scroll is the only one (no competing outer bar).
   useEffect(() => {
     editor.setEditable(!active);
+    if (active) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = prev;
+      };
+    }
   }, [editor, active]);
 
   // Live editor snapshot when To = "latest". Must run unconditionally (Rules
@@ -121,6 +130,10 @@ export function CompareSurface(): JSX.Element | null {
     () => (toId === LATEST_ID ? editor.getEditorState().toJSON() : null),
     [editor, toId],
   );
+
+  // Trap wheel scrolling inside the compare surface (attached to the surface
+  // root, which mounts only when active — a callback ref handles that).
+  const trapRef = useScrollTrap();
 
   if (!active || fromId === null || toId === null) {
     return null;
@@ -166,7 +179,7 @@ export function CompareSurface(): JSX.Element | null {
   const toNewer = step(toTimeline, toId, 1);
 
   return (
-    <div className="compare-surface">
+    <div className="compare-surface" ref={trapRef}>
       <div className="compare-bar">
         <span className="compare-title">Comparing · read-only</span>
         <div className="compare-side">

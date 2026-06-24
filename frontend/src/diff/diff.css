@@ -172,16 +172,35 @@
 }
 
 /* ---- Compare surface (in-editor, read-only diff) ---- */
+/* Fixed, viewport-height overlay below the app bar: a single scroll surface
+   (.compare-scroll) for the whole diff. The page is locked while compare is
+   active (see CompareMode), so there is no competing outer scrollbar. Its
+   left/right edges follow the side docks (via the --ge-*-width vars on body) so
+   it adapts to the sidebars like the editor does, and it caps/clamps to the
+   editor column width (max 1128, centered). */
 .compare-surface {
-  position: absolute;
-  inset: 0;
-  min-height: 65vh;
-  z-index: 5;
+  position: fixed;
+  top: var(--ge-app-bar-height, 0px);
+  bottom: 0;
+  left: 0;
+  right: 0;
+  max-width: 1128px;
+  margin-inline: auto;
+  z-index: 50;
   background: var(--ge-surface);
+  border: 1px solid var(--ge-border);
+  border-top: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-radius: 0 0 10px 10px;
+}
+@media (min-width: 901px) {
+  body.ge-versions-open .compare-surface {
+    left: var(--ge-versions-width, 340px);
+  }
+  body.ge-chat-open .compare-surface {
+    right: var(--ge-chat-width, 400px);
+  }
 }
 .compare-bar {
   display: flex;

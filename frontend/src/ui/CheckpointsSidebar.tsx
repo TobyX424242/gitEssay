@@ -10,10 +10,12 @@ import {type JSX, useEffect} from 'react';
 import {versionsPanel} from '../chat/panelStore';
 import CheckpointsList from './CheckpointsList';
 import {SidePanelResizer} from './SidePanelResizer';
+import {useScrollTrap} from './useScrollTrap';
 import {useSidePanel} from './sidePanelStore';
 
 export default function CheckpointsSidebar(): JSX.Element {
   const {open, width} = useSidePanel(versionsPanel);
+  const trapRef = useScrollTrap();
 
   useEffect(() => {
     document.body.style.setProperty('--ge-versions-width', `${width}px`);
@@ -38,6 +40,7 @@ export default function CheckpointsSidebar(): JSX.Element {
         </button>
       )}
       <aside
+        ref={trapRef}
         className={`versions-dock${open ? ' is-open' : ''}`}
         aria-hidden={!open}>
         <SidePanelResizer store={versionsPanel} dockSide="left" />

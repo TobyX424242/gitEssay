@@ -26,6 +26,7 @@ import {chatPanel, closePanel, openPanel, usePanelOpen, usePanelWidth} from './p
 import {getActiveChatProvider} from './providers';
 import type {ChatContext, ChatEditState, ChatMessage} from './types';
 import {SidePanelResizer} from '../ui/SidePanelResizer';
+import {useScrollTrap} from '../ui/useScrollTrap';
 import './chat.css';
 
 export default function ChatSidebar(): JSX.Element {
@@ -46,6 +47,7 @@ export default function ChatSidebar(): JSX.Element {
   const idRef = useRef(0);
   const nextId = useCallback(() => `m${++idRef.current}`, []);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const trapRef = useScrollTrap();
 
   // Reserve editor space + drive the dock width via a CSS var (wide screens only).
   useEffect(() => {
@@ -204,7 +206,10 @@ export default function ChatSidebar(): JSX.Element {
           ‹ AI
         </button>
       )}
-      <aside className={`chat-dock${open ? ' is-open' : ''}`} aria-hidden={!open}>
+      <aside
+        ref={trapRef}
+        className={`chat-dock${open ? ' is-open' : ''}`}
+        aria-hidden={!open}>
         <SidePanelResizer store={chatPanel} dockSide="right" />
         <header className="chat-header">
           <span className="chat-title">AI</span>
