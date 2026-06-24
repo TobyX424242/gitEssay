@@ -30,7 +30,11 @@ import {configExtension, defineExtension} from 'lexical';
 import {type JSX} from 'react';
 
 import {ToolbarContext} from './context/ToolbarContext';
+import ChatSidebar from './chat/ChatSidebar';
 import Editor from './Editor';
+import AppActionBar from './ui/AppActionBar';
+import CheckpointsSidebar from './ui/CheckpointsSidebar';
+import {CompareModeProvider} from './ui/CompareMode';
 import {PlaygroundImportExtension} from './nodes/PlaygroundImportExtension';
 import PlaygroundNodes from './nodes/PlaygroundNodes';
 import {PlaygroundDOMRenderExtension} from './PlaygroundDOMRenderExtension';
@@ -48,6 +52,7 @@ import {TerseExportExtension} from './plugins/TerseExportExtension';
 import PlaygroundEditorTheme from './themes/PlaygroundEditorTheme';
 import './themes/darkMode.css';
 import ThemeToggle from './ui/ThemeToggle';
+import './ui/sidebars.css';
 import {validateUrl} from './utils/url';
 
 /** Rich-text-only feature set: tables, images, equations, lists, code, etc. */
@@ -114,13 +119,15 @@ export default function App(): JSX.Element {
   return (
     <LexicalExtensionComposer extension={appExtension} contentEditable={null}>
       <ToolbarContext>
-        <header className="app-header">
-          <span className="app-title">gitEssay</span>
-        </header>
-        <div className="editor-shell">
-          <Editor />
-        </div>
-        <ThemeToggle />
+        <CompareModeProvider>
+          <AppActionBar />
+          <div className="editor-shell">
+            <Editor />
+          </div>
+          <CheckpointsSidebar />
+          <ChatSidebar />
+          <ThemeToggle />
+        </CompareModeProvider>
       </ToolbarContext>
     </LexicalExtensionComposer>
   );

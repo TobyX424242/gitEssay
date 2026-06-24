@@ -1,0 +1,133 @@
+/* gitEssay — shared side-dock chrome (resize handle, reopen tabs, body padding).
+   Used by the AI chat dock (right) and the Versions dock (left). */
+
+/* Push the centered editor aside when a dock is open — wide screens only. */
+@media (min-width: 901px) {
+  body.ge-chat-open {
+    padding-right: var(--ge-chat-width, 400px);
+  }
+  body.ge-versions-open {
+    padding-left: var(--ge-versions-width, 340px);
+  }
+}
+
+/* Drag handle on a dock's inner edge. */
+.side-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  z-index: 5;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+.side-resizer:hover,
+.side-resizer:active {
+  background: var(--ge-accent);
+  opacity: 0.5;
+}
+/* Right dock (chat): handle on the LEFT edge. */
+.side-resizer--right {
+  left: -3px;
+}
+/* Left dock (versions): handle on the RIGHT edge. */
+.side-resizer--left {
+  right: -3px;
+}
+
+/* Reopen tab shown at the screen edge when a dock is closed. */
+.side-reopen {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 199;
+  border: 1px solid var(--ge-border);
+  background: var(--ge-surface);
+  color: var(--ge-text);
+  padding: 14px 8px;
+  cursor: pointer;
+  font-size: 13px;
+  writing-mode: vertical-rl;
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.12);
+}
+.side-reopen:hover {
+  background: var(--ge-surface-2);
+}
+.side-reopen--right {
+  right: 0;
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
+  box-shadow: -4px 0 12px rgba(0, 0, 0, 0.12);
+}
+.side-reopen--left {
+  left: 0;
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  box-shadow: 4px 0 12px rgba(0, 0, 0, 0.12);
+}
+
+/* ---- Left Versions dock ---- */
+.versions-dock {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--ge-versions-width, 340px);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  background: var(--ge-surface);
+  border-right: 1px solid var(--ge-border);
+  box-shadow: 8px 0 28px rgba(0, 0, 0, 0.18);
+  transform: translateX(-100%);
+  transition: transform 0.2s ease;
+}
+.versions-dock.is-open {
+  transform: translateX(0);
+}
+@media (max-width: 900px) {
+  .versions-dock {
+    width: min(var(--ge-versions-width, 340px), 100vw);
+  }
+}
+
+/* Generic dock header/body (shared with the AI dock if needed). */
+.dock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ge-border);
+  background: var(--ge-surface-2);
+}
+.dock-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.dock-header-btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dock-exit-compare {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+.dock-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dock-body .cp-list {
+  flex: 1;
+}
+.dock-body .cp-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ge-border);
+}

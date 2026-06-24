@@ -75,6 +75,7 @@ import {
 import useModal from '../../hooks/useModal';
 import DropDown, {DropDownItem} from '../../ui/DropDown';
 import DropdownColorPicker from '../../ui/DropdownColorPicker';
+import OverflowToolbar from '../../ui/OverflowToolbar';
 import {isKeyboardInput} from '../../utils/focusUtils';
 import {getSelectedNode} from '../../utils/getSelectedNode';
 import {sanitizeUrl} from '../../utils/url';
@@ -908,13 +909,14 @@ export default function ToolbarPlugin({
   const canViewerSeeInsertCodeButton = !toolbarState.isImageCaption;
 
   return (
-    <div className="toolbar">
-      <button
-        disabled={!toolbarState.canUndo || !isEditable}
-        onClick={e =>
-          dispatchToolbarCommand(UNDO_COMMAND, undefined, isKeyboardInput(e))
-        }
-        title={IS_APPLE ? 'Undo (⌘Z)' : 'Undo (Ctrl+Z)'}
+    <>
+      <OverflowToolbar className="toolbar">
+        <button
+          disabled={!toolbarState.canUndo || !isEditable}
+          onClick={e =>
+            dispatchToolbarCommand(UNDO_COMMAND, undefined, isKeyboardInput(e))
+          }
+          title={IS_APPLE ? 'Undo (⌘Z)' : 'Undo (Ctrl+Z)'}
         type="button"
         className="toolbar-item spaced"
         aria-label="Undo">
@@ -1372,8 +1374,9 @@ export default function ToolbarPlugin({
         editor={activeEditor}
         isRTL={toolbarState.isRTL}
       />
+      </OverflowToolbar>
 
       {modal}
-    </div>
+    </>
   );
 }

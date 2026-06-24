@@ -12,7 +12,6 @@ import {TabIndentationPlugin} from '@lexical/react/LexicalTabIndentationPlugin';
 import {CAN_USE_DOM} from '@lexical/utils';
 import {type JSX, useEffect, useState} from 'react';
 
-import ActionsPlugin from './plugins/ActionsPlugin';
 import CodeActionMenuPlugin from './plugins/CodeActionMenuPlugin';
 import ComponentPickerPlugin from './plugins/ComponentPickerPlugin';
 import DraggableBlockPlugin from './plugins/DraggableBlockPlugin';
@@ -25,7 +24,7 @@ import TableHoverActionsV2Plugin from './plugins/TableHoverActionsV2Plugin';
 import TableScrollShadowPlugin from './plugins/TableScrollShadowPlugin';
 import CheckpointPlugin from './plugins/CheckpointPlugin';
 import ToolbarPlugin from './plugins/ToolbarPlugin';
-import {CompareModeProvider, CompareSurface} from './ui/CompareMode';
+import {CompareSurface} from './ui/CompareMode';
 import ContentEditable from './ui/ContentEditable';
 
 export default function Editor(): JSX.Element {
@@ -56,7 +55,7 @@ export default function Editor(): JSX.Element {
   }, []);
 
   return (
-    <CompareModeProvider>
+    <>
       <ToolbarPlugin
         editor={editor}
         activeEditor={activeEditor}
@@ -103,8 +102,7 @@ export default function Editor(): JSX.Element {
           </>
         )}
         <CompareSurface />
-        <ActionsPlugin />
       </div>
-    </CompareModeProvider>
+    </>
   );
 }

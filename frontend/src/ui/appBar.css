@@ -1,0 +1,78 @@
+/* gitEssay — fixed top app bar (special doc actions + sidebar toggles).
+   The formatting .toolbar is sticky just below it (top: var(--ge-app-bar-height)). */
+
+:root {
+  --ge-app-bar-height: 44px;
+}
+
+.app-bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: var(--ge-app-bar-height);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px;
+  background: var(--ge-surface);
+  border-bottom: 1px solid var(--ge-border);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+}
+.app-bar-title {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.2px;
+}
+.app-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.app-bar i {
+  background-size: contain;
+  display: inline-block;
+  height: 16px;
+  width: 16px;
+  vertical-align: -0.2em;
+}
+.app-bar-btn {
+  border: 0;
+  background: transparent;
+  color: var(--ge-text);
+  padding: 7px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.app-bar-btn:hover:not(:disabled) {
+  background: var(--ge-surface-2);
+}
+.app-bar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.app-bar-btn.is-active {
+  background: var(--ge-accent);
+}
+.app-bar-btn.is-active i {
+  filter: brightness(0) invert(1);
+}
+.app-bar-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--ge-border);
+  margin: 0 6px;
+}
+
+[data-theme='dark'] .app-bar i {
+  filter: invert(1);
+}
+/* keep active (white-on-accent) icons white in dark mode too */
+[data-theme='dark'] .app-bar-btn.is-active i {
+  filter: brightness(0) invert(1);
+}
