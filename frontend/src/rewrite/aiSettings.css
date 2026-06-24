@@ -1,0 +1,128 @@
+/* gitEssay — AI provider settings panel. Reuses the CheckpointsPanel chrome
+   (cp-*) and adds ai-* layout. Follows the --ge-* tokens for light/dark. */
+
+.ai-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 320; /* above the rewrite panel (300) */
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-panel {
+  width: min(480px, 94vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--ge-surface);
+  color: var(--ge-text);
+  border: 1px solid var(--ge-border);
+  border-radius: 12px;
+  box-shadow: 0 14px 48px rgba(0, 0, 0, 0.34);
+  overflow: hidden;
+}
+
+.ai-body {
+  padding: 14px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ai-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ge-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-hint {
+  font-weight: 400;
+  color: var(--ge-text-muted);
+  opacity: 0.8;
+  font-size: 11px;
+}
+.ai-key-row {
+  display: flex;
+  gap: 8px;
+}
+.ai-key-row .cp-input {
+  flex: 1;
+}
+.ai-key-toggle {
+  white-space: nowrap;
+}
+
+.ai-advanced-toggle {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--ge-accent);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.ai-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--ge-border);
+  border-radius: 8px;
+  background: var(--ge-surface-2);
+}
+
+.ai-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ge-text-muted);
+  line-height: 1.5;
+}
+.ai-note--muted {
+  opacity: 0.85;
+}
+
+.ai-test {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.ai-test.is-ok {
+  background: rgba(86, 200, 130, 0.18);
+  color: #1d5135;
+}
+.ai-test.is-err {
+  background: rgba(230, 96, 96, 0.18);
+  color: #6e1f1f;
+}
+[data-theme='dark'] .ai-test.is-ok {
+  color: #9fe6b8;
+}
+[data-theme='dark'] .ai-test.is-err {
+  color: #f0a9a9;
+}
+
+.ai-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--ge-border);
+}
+.ai-footer-right {
+  display: flex;
+  gap: 8px;
+}
