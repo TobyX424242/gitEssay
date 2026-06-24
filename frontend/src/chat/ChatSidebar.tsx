@@ -251,7 +251,7 @@ export default function ChatSidebar(): JSX.Element {
               </p>
               <p className="chat-empty-sub">
                 Edits appear as reviewable diffs — nothing changes until you accept.
-                {!configured && ' (Running in local demo mode — configure a model in ⚙.)'}
+                {!configured && ' (No model configured — open ⚙ to set up your API.)'}
               </p>
             </div>
           )}

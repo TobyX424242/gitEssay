@@ -1,15 +1,17 @@
 /**
- * gitEssay — chat providers (LLM + local demo mock).
+ * gitEssay — chat providers.
  *
- * Both implement ChatProvider.chat(ctx) → {text, edits}. The unified protocol is
- * coding-agent-style SEARCH/REPLACE: the model proposes targeted, reviewable
- * edits (never a whole-document replacement). The sidebar picks the live LLM
- * provider when AI is configured, else falls back to the deterministic mock so
- * the feature is always demonstrable.
+ * The sidebar uses the live LLM provider when AI is configured. If the API call
+ * fails (bad key / URL / model, network, non-OK response) callModel throws and
+ * the sidebar surfaces an error — it never fabricates an accept/reject. When AI
+ * is NOT configured, the provider throws a clear "not configured" error as well
+ * (no silent demo fallback that would present the user's own text as output).
+ *
+ * Edits are sanitized: a no-op edit (replace === search) is dropped, so the UI
+ * never asks the user to "accept" their own unchanged text.
  */
 import type {AISettings} from '../rewrite/aiSettings';
 import {callModel} from '../rewrite/llmClient';
-import {detectMockAction, mockTransform} from '../rewrite/mockProvider';
 
 import {parsePatches} from './patch';
 import type {ChatContext, ChatProvider, ChatResponse} from './types';
@@ -63,6 +65,14 @@ function buildUserMessage(ctx: ChatContext): string {
   ].join('\n');
 }
 
+/** Drop no-op edits (replace unchanged) so we never offer the user's own text as a change. */
+function sanitize(resp: ChatResponse): ChatResponse {
+  const edits = resp.edits.filter(e => e.replace.trim() !== e.search.trim());
+  const text =
+    edits.length === 0 && !resp.text.trim() ? 'No changes to apply.' : resp.text;
+  return {text, edits};
+}
+
 /** A ChatProvider bound to validated settings. */
 export function createChatLLMProvider(s: AISettings): ChatProvider {
   return {
@@ -73,43 +83,28 @@ export function createChatLLMProvider(s: AISettings): ChatProvider {
         system: PATCH_SYSTEM_PROMPT,
         user: buildUserMessage(ctx),
       });
-      const {prose, edits} = parsePatches(raw);
-      return {text: prose, edits};
+      return sanitize(parsePatches(raw));
     },
   };
 }
 
-/** Deterministic local demo (no key / no network). */
-export const mockChatProvider: ChatProvider = {
-  id: 'mock',
-  label: 'AI · demo (local)',
-  chat: ctx => {
-    const action = detectMockAction(ctx.instruction);
-    if (ctx.mode === 'selection' && ctx.selectionText && ctx.selectionText.trim()) {
-      const replace = mockTransform(action, ctx.selectionText);
-      const resp: ChatResponse = {
-        text: `Here is a ${action} revision of your selection.`,
-        edits: [{search: ctx.selectionText, replace}],
-      };
-      return Promise.resolve(resp);
-    }
-    const firstBlock =
-      ctx.documentText.split(/\n\s*\n/).find(b => b.trim().length > 0) ?? '';
-    if (!firstBlock) {
-      return Promise.resolve({text: 'The document is empty — type something first.', edits: []});
-    }
-    const replace = mockTransform(action, firstBlock);
-    return Promise.resolve({
-      text: `I ${action}ed the opening passage:`,
-      edits: [{search: firstBlock, replace}],
-    });
-  },
-};
+/** Not configured: always errors so the user is told to set up the API. */
+export function unconfiguredChatProvider(): ChatProvider {
+  return {
+    id: 'unconfigured',
+    label: 'AI · not configured',
+    chat: async () => {
+      throw new Error(
+        'AI is not configured. Open the ⚙ settings to set your provider, API key, and model.',
+      );
+    },
+  };
+}
 
-/** Active provider: live LLM when configured, else the local mock. */
+/** Active provider: live LLM when configured, else an error-throwing provider. */
 export function getActiveChatProvider(
   configured: boolean,
   settings: AISettings,
 ): ChatProvider {
-  return configured ? createChatLLMProvider(settings) : mockChatProvider;
+  return configured ? createChatLLMProvider(settings) : unconfiguredChatProvider();
 }
