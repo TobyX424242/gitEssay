@@ -279,3 +279,142 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ---- conversation switcher ---- */
+.chat-switcher {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--ge-border);
+  background: var(--ge-surface-2);
+}
+.chat-switcher-btn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--ge-border);
+  border-radius: 6px;
+  background: var(--ge-surface);
+  color: var(--ge-text);
+  padding: 5px 9px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.chat-switcher-btn:hover {
+  background: var(--ge-surface-2);
+}
+.chat-switcher-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.chat-switcher-chev {
+  color: var(--ge-text-muted);
+  font-size: 11px;
+}
+.chat-switcher-new {
+  border: 1px solid var(--ge-border);
+  border-radius: 6px;
+  background: var(--ge-surface);
+  color: var(--ge-text);
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chat-switcher-new:hover {
+  background: var(--ge-surface-2);
+}
+.chat-switcher-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+}
+.chat-switcher-list {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 10px;
+  right: 10px;
+  z-index: 21;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--ge-surface);
+  border: 1px solid var(--ge-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  padding: 4px;
+}
+.chat-switcher-empty {
+  padding: 10px;
+  color: var(--ge-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+.chat-conv-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.chat-conv-item:hover {
+  background: var(--ge-surface-2);
+}
+.chat-conv-item.is-active {
+  background: var(--ge-surface-2);
+}
+.chat-conv-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-conv-del {
+  border: 0;
+  background: transparent;
+  color: var(--ge-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 4px;
+  opacity: 0.6;
+}
+.chat-conv-del:hover {
+  background: rgba(230, 96, 96, 0.18);
+  color: #c0392b;
+  opacity: 1;
+}
+
+/* ---- retry toolbar on assistant messages ---- */
+.chat-msg-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 4px;
+}
+.chat-retry {
+  border: 0;
+  background: transparent;
+  color: var(--ge-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.chat-retry:hover:not(:disabled) {
+  background: var(--ge-surface-2);
+  color: var(--ge-text);
+}
+.chat-retry:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

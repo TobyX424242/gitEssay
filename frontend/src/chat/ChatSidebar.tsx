@@ -1,10 +1,12 @@
 /**
  * gitEssay — AI chat sidebar (VS Code-style right dock).
  *
- * Always-available conversation surface. Context rules: a non-collapsed
- * selection is the edit target; otherwise the full document is the context.
- * The provider returns prose + SEARCH/REPLACE edits; each edit renders as a
- * reviewable diff card and is applied only on Accept (then checkpointed).
+ * Always-available conversation surface with multiple, persisted, switchable
+ * conversations. Context rules: a non-collapsed selection is the edit target;
+ * otherwise the full document is the context. The provider returns prose +
+ * SEARCH/REPLACE edits; each edit renders as a reviewable diff card and is
+ * applied only on Accept (then checkpointed). Every AI response has a Retry
+ * control that re-runs the original request.
  */
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {
@@ -21,6 +23,16 @@ import {REWRITE_ACTIONS} from '../rewrite/actions';
 import {isConfigured, useAISettings} from '../rewrite/aiSettings';
 import AISettingsPanel from '../rewrite/AISettingsPanel';
 
+import {
+  appendMessages,
+  bootstrapConversations,
+  createConversation,
+  deleteConversation,
+  replaceMessage,
+  setActiveConversation,
+  setEditState,
+  useConversations,
+} from './conversations';
 import {applyTextPatch, plainTextToBlocks} from './patch';
 import {chatPanel, closePanel, openPanel, usePanelOpen, usePanelWidth} from './panelStore';
 import {getActiveChatProvider} from './providers';
@@ -29,25 +41,46 @@ import {SidePanelResizer} from '../ui/SidePanelResizer';
 import {useScrollTrap} from '../ui/useScrollTrap';
 import './chat.css';
 
+function msgId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `m${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function deriveTitle(text: string): string {
+  const t = text.trim().replace(/\s+/g, ' ');
+  if (!t) {
+    return 'New conversation';
+  }
+  return t.length > 40 ? `${t.slice(0, 40)}…` : t;
+}
+
 export default function ChatSidebar(): JSX.Element {
   const [editor] = useLexicalComposerContext();
   const open = usePanelOpen();
   const width = usePanelWidth();
   const settings = useAISettings();
   const configured = isConfigured(settings);
+  const {conversations, activeId, active} = useConversations();
+  const messages = active?.messages ?? [];
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showList, setShowList] = useState(false);
   const [selInfo, setSelInfo] = useState<{mode: 'selection' | 'document'; chars: number}>(
     {mode: 'document', chars: 0},
   );
 
-  const idRef = useRef(0);
-  const nextId = useCallback(() => `m${++idRef.current}`, []);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const trapRef = useScrollTrap();
+
+  // Ensure at least one conversation exists.
+  useEffect(() => {
+    bootstrapConversations();
+  }, []);
 
   // Reserve editor space + drive the dock width via a CSS var (wide screens only).
   useEffect(() => {
@@ -84,7 +117,7 @@ export default function ChatSidebar(): JSX.Element {
     if (el) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [messages, loading]);
+  }, [messages, loading, retryingId]);
 
   const captureContext = useCallback(
     (instruction: string): ChatContext => {
@@ -113,71 +146,103 @@ export default function ChatSidebar(): JSX.Element {
   const send = useCallback(
     (instruction?: string) => {
       const text = (instruction ?? input).trim();
-      if (!text || loading) {
+      if (!text || loading || !active) {
         return;
       }
+      const convId = active.id;
       const ctx = captureContext(text);
-      setMessages(m => [...m, {id: nextId(), role: 'user', text}]);
+      const needsTitle =
+        active.messages.length === 0 || active.title === 'New conversation';
+      const title = needsTitle ? deriveTitle(text) : undefined;
+      const userMsg: ChatMessage = {id: msgId(), role: 'user', text, context: ctx};
       setInput('');
       setLoading(true);
+      void appendMessages(convId, [userMsg], title);
       const provider = getActiveChatProvider(configured, settings);
       provider
         .chat(ctx)
         .then(resp => {
-          setMessages(m => [
-            ...m,
-            {
-              id: nextId(),
-              role: 'assistant',
-              text: resp.text,
-              mode: ctx.mode,
-              edits: resp.edits.map(e => ({...e, state: 'pending' as ChatEditState})),
-            },
-          ]);
+          const aMsg: ChatMessage = {
+            id: msgId(),
+            role: 'assistant',
+            text: resp.text,
+            mode: ctx.mode,
+            edits: resp.edits.map(e => ({...e, state: 'pending' as ChatEditState})),
+          };
+          void appendMessages(convId, [aMsg]);
         })
         .catch((err: unknown) => {
-          setMessages(m => [
-            ...m,
-            {
-              id: nextId(),
-              role: 'assistant',
-              text: '',
-              error: err instanceof Error ? err.message : String(err),
-            },
-          ]);
+          const aMsg: ChatMessage = {
+            id: msgId(),
+            role: 'assistant',
+            text: '',
+            error: err instanceof Error ? err.message : String(err),
+          };
+          void appendMessages(convId, [aMsg]);
         })
         .finally(() => setLoading(false));
     },
-    [captureContext, configured, input, loading, nextId, settings],
+    [active, captureContext, configured, input, loading, settings],
   );
 
-  const setEditState = useCallback(
-    (msgId: string, editIdx: number, state: ChatEditState) => {
-      setMessages(m =>
-        m.map(mm =>
-          mm.id === msgId
-            ? {
-                ...mm,
-                edits: mm.edits?.map((e, i) => (i === editIdx ? {...e, state} : e)),
-              }
-            : mm,
-        ),
-      );
+  const retry = useCallback(
+    (assistantId: string) => {
+      if (!active || loading || retryingId) {
+        return;
+      }
+      const msgs = active.messages;
+      const idx = msgs.findIndex(m => m.id === assistantId);
+      if (idx < 1) {
+        return;
+      }
+      const userMsg = msgs[idx - 1];
+      if (userMsg.role !== 'user' || !userMsg.context) {
+        return;
+      }
+      const ctx = userMsg.context;
+      const convId = active.id;
+      setRetryingId(assistantId);
+      const provider = getActiveChatProvider(configured, settings);
+      provider
+        .chat(ctx)
+        .then(resp => {
+          const aMsg: ChatMessage = {
+            id: assistantId,
+            role: 'assistant',
+            text: resp.text,
+            mode: ctx.mode,
+            edits: resp.edits.map(e => ({...e, state: 'pending' as ChatEditState})),
+          };
+          void replaceMessage(convId, assistantId, aMsg);
+        })
+        .catch((err: unknown) => {
+          const aMsg: ChatMessage = {
+            id: assistantId,
+            role: 'assistant',
+            text: '',
+            error: err instanceof Error ? err.message : String(err),
+          };
+          void replaceMessage(convId, assistantId, aMsg);
+        })
+        .finally(() => setRetryingId(null));
     },
-    [],
+    [active, configured, loading, retryingId, settings],
   );
 
   const acceptEdit = useCallback(
-    async (msgId: string, editIdx: number, search: string, replace: string) => {
+    async (msgId_: string, editIdx: number, search: string, replace: string) => {
+      if (!active) {
+        return;
+      }
       const res = await applyTextPatch(editor, search, replace);
       if (res.ok) {
         await captureCheckpoint(editor, {source: 'ai-accept', label: 'AI chat edit'});
-        setEditState(msgId, editIdx, 'applied');
+        void setEditState(active.id, msgId_, editIdx, 'applied');
       } else {
-        setEditState(msgId, editIdx, 'unlocatable');
+        void setEditState(active.id, msgId_, editIdx, 'unlocatable');
       }
     },
-    [editor, setEditState],
+    [active, editor],
   );
 
   const onComposerKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -192,7 +257,8 @@ export default function ChatSidebar(): JSX.Element {
       ? `Selection · ${selInfo.chars} chars`
       : 'Full document';
 
-  const sendDisabled = !input.trim() || loading;
+  const busy = loading || retryingId !== null;
+  const sendDisabled = !input.trim() || loading || !active;
 
   return (
     <>
@@ -242,6 +308,67 @@ export default function ChatSidebar(): JSX.Element {
           </div>
         </header>
 
+        <div className="chat-switcher">
+          <button
+            type="button"
+            className="chat-switcher-btn"
+            onClick={() => setShowList(v => !v)}
+            title="Switch conversation"
+            aria-label="Switch conversation">
+            <span className="chat-switcher-title">
+              {active?.title || 'Conversations'}
+            </span>
+            <span className="chat-switcher-chev">▾</span>
+          </button>
+          <button
+            type="button"
+            className="chat-switcher-new"
+            onClick={() => {
+              void createConversation();
+              setShowList(false);
+            }}
+            title="New conversation"
+            aria-label="New conversation">
+            + New
+          </button>
+          {showList && (
+            <>
+              <div
+                className="chat-switcher-backdrop"
+                onClick={() => setShowList(false)}
+              />
+              <div className="chat-switcher-list" role="menu">
+                {conversations.length === 0 && (
+                  <div className="chat-switcher-empty">No conversations.</div>
+                )}
+                {conversations.map(c => (
+                  <div
+                    key={c.id}
+                    role="menuitem"
+                    className={`chat-conv-item${c.id === activeId ? ' is-active' : ''}`}
+                    onClick={() => {
+                      void setActiveConversation(c.id);
+                      setShowList(false);
+                    }}>
+                    <span className="chat-conv-title">{c.title || 'Untitled'}</span>
+                    <button
+                      type="button"
+                      className="chat-conv-del"
+                      title="Delete conversation"
+                      aria-label="Delete conversation"
+                      onClick={e => {
+                        e.stopPropagation();
+                        void deleteConversation(c.id);
+                      }}>
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
         <div className="chat-messages" ref={scrollRef}>
           {messages.length === 0 && !loading && (
             <div className="chat-empty">
@@ -260,8 +387,11 @@ export default function ChatSidebar(): JSX.Element {
             <MessageBubble
               key={m.id}
               message={m}
+              retrying={m.id === retryingId}
+              busy={busy}
               onAccept={(i, e) => acceptEdit(m.id, i, e.search, e.replace)}
-              onReject={i => setEditState(m.id, i, 'rejected')}
+              onReject={i => active && void setEditState(active.id, m.id, i, 'rejected')}
+              onRetry={retry}
             />
           ))}
 
@@ -318,12 +448,18 @@ export default function ChatSidebar(): JSX.Element {
 
 function MessageBubble({
   message,
+  retrying,
+  busy,
   onAccept,
   onReject,
+  onRetry,
 }: {
   message: ChatMessage;
+  retrying: boolean;
+  busy: boolean;
   onAccept: (editIdx: number, edit: {search: string; replace: string}) => void;
   onReject: (editIdx: number) => void;
+  onRetry: (assistantId: string) => void;
 }): JSX.Element {
   const editOps = useMemo(
     () =>
@@ -343,7 +479,13 @@ function MessageBubble({
 
   return (
     <div className="chat-msg chat-msg--assistant">
-      {message.error ? (
+      {retrying ? (
+        <div className="chat-thinking" aria-label="Regenerating">
+          <span />
+          <span />
+          <span />
+        </div>
+      ) : message.error ? (
         <div className="chat-bubble chat-bubble--assistant chat-error">
           ⚠ {message.error}
         </div>
@@ -390,6 +532,18 @@ function MessageBubble({
             </div>
           ))}
         </>
+      )}
+      {!retrying && (
+        <div className="chat-msg-actions">
+          <button
+            type="button"
+            className="chat-retry"
+            disabled={busy}
+            onClick={() => onRetry(message.id)}
+            title="Regenerate this response">
+            ↻ Retry
+          </button>
+        </div>
       )}
     </div>
   );

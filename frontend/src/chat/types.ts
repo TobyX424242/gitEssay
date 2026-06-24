@@ -47,6 +47,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   /** For 'user': the instruction; for 'assistant': prose (may be empty). */
   text: string;
+  /** User only: the exact request context captured at send time (drives Retry). */
+  context?: ChatContext;
   /** Assistant only: context mode captured when the turn was sent. */
   mode?: ChatMode;
   /** Assistant only: proposed edits, each with its own accept/reject state. */
