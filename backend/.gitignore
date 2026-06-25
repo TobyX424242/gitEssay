@@ -1,0 +1,6 @@
+# runtime data + tooling — never commit
+gitessay.db
+gitessay.db-journal
+__pycache__/
+*.pyc
+.venv/
