@@ -1,0 +1,132 @@
+/* gitEssay — project switcher (app bar). Mirrors the chat conversation switcher. */
+
+.proj-switcher {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.proj-switcher-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--ge-border);
+  border-radius: 6px;
+  background: var(--ge-surface);
+  color: var(--ge-text);
+  padding: 4px 9px;
+  font-size: 13px;
+  cursor: pointer;
+  max-width: 220px;
+}
+.proj-switcher-btn:hover:not(:disabled) {
+  background: var(--ge-surface-2);
+}
+.proj-switcher-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.proj-switcher-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.proj-switcher-chev {
+  color: var(--ge-text-muted);
+  font-size: 11px;
+}
+.proj-switcher-new {
+  font-size: 12px;
+  padding: 5px 10px;
+}
+.proj-switcher-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+.proj-switcher-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 91;
+  min-width: 240px;
+  max-width: 320px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--ge-surface);
+  border: 1px solid var(--ge-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  padding: 4px;
+}
+.proj-switcher-empty {
+  padding: 10px;
+  color: var(--ge-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+.proj-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.proj-item:hover {
+  background: var(--ge-surface-2);
+}
+.proj-item.is-active {
+  background: var(--ge-surface-2);
+}
+.proj-item-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.proj-item-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.proj-item:hover .proj-item-actions,
+.proj-item.is-active .proj-item-actions {
+  opacity: 1;
+}
+.proj-item-btn {
+  border: 0;
+  background: transparent;
+  color: var(--ge-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+.proj-item-btn:hover {
+  background: var(--ge-surface);
+  color: var(--ge-text);
+}
+.proj-item-del:hover {
+  background: rgba(230, 96, 96, 0.18);
+  color: #c0392b;
+}
+.proj-rename {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-family: inherit;
+  padding: 2px 6px;
+  border: 1px solid var(--ge-accent);
+  border-radius: 4px;
+  background: var(--ge-surface);
+  color: var(--ge-text);
+  width: 100%;
+}
+.proj-rename:focus {
+  outline: none;
+}

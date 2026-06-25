@@ -27,8 +27,10 @@ import {LexicalExtensionComposer} from '@lexical/react/LexicalExtensionComposer'
 import {RichTextExtension} from '@lexical/rich-text';
 import {TableExtension} from '@lexical/table';
 import {configExtension, defineExtension} from 'lexical';
-import {type JSX} from 'react';
+import {type JSX, useEffect} from 'react';
 
+import {loadAISettings} from './rewrite/aiSettings';
+import {loadProjects} from './projects/projectStore';
 import {ToolbarContext} from './context/ToolbarContext';
 import ChatSidebar from './chat/ChatSidebar';
 import Editor from './Editor';
@@ -116,6 +118,12 @@ const appExtension = /* @__PURE__ */ defineExtension({
 });
 
 export default function App(): JSX.Element {
+  // Load the project list (+ resolve active) and AI settings from the backend.
+  useEffect(() => {
+    void loadProjects();
+    void loadAISettings();
+  }, []);
+
   return (
     <LexicalExtensionComposer extension={appExtension} contentEditable={null}>
       <ToolbarContext>

@@ -26,6 +26,13 @@ export default defineConfig(() => ({
     // Avoid the host's squatted 5173/8000 ports; gitEssay uses 5180.
     port: 5180,
     host: true,
+    // Proxy API calls to the FastAPI backend (avoids CORS in dev).
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+    },
   },
   plugins: [
     react(),

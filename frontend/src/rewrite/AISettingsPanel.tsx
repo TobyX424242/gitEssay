@@ -1,40 +1,49 @@
 /**
- * gitEssay — AI provider settings panel.
+ * gitEssay — AI provider settings panel (backend-backed).
  *
- * Configure the live model: request format (OpenAI- or Anthropic-compatible),
- * base URL, API key, model, and an optional advanced section (temperature +
- * input/output token budgets). Settings persist to localStorage and are sent
- * only to the configured base URL. Includes a Test button that pings the model.
+ * The API key is stored server-side; the read here is masked (api_key="",
+ * has_key). Leaving the key field empty on Save/Test keeps the existing key
+ * (sends api_key=null); typing a new value replaces it.
  */
 import {type JSX, useState} from 'react';
 import {createPortal} from 'react-dom';
 
 import {
-  DEFAULT_AI_SETTINGS,
-  DEFAULT_BASE,
-  DEFAULT_MODEL,
   type AISettings,
   type ProviderFormat,
+  DEFAULT_BASE,
+  DEFAULT_MODEL,
   isConfigured,
-  loadAISettings,
-  resetAISettings,
   saveAISettings,
+  useAISettings,
 } from './aiSettings';
 import {testConnection} from './llmClient';
 import './aiSettings.css';
+
+const DEFAULTS: AISettings = {
+  format: 'openai',
+  baseURL: DEFAULT_BASE.openai,
+  apiKey: '',
+  hasKey: false,
+  model: DEFAULT_MODEL.openai,
+  temperature: 0.7,
+  maxInputTokens: 16000,
+  maxOutputTokens: 8000,
+};
 
 export default function AISettingsPanel({
   onClose,
 }: {
   onClose: () => void;
 }): JSX.Element {
-  const [draft, setDraft] = useState<AISettings>(() => loadAISettings());
+  const current = useAISettings();
+  const [draft, setDraft] = useState<AISettings>(() => ({...current}));
   const [showKey, setShowKey] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(
     () =>
-      draft.temperature !== DEFAULT_AI_SETTINGS.temperature ||
-      draft.maxInputTokens !== DEFAULT_AI_SETTINGS.maxInputTokens ||
-      draft.maxOutputTokens !== DEFAULT_AI_SETTINGS.maxOutputTokens,
+      draft.temperature !== DEFAULTS.temperature ||
+      draft.maxInputTokens !== DEFAULTS.maxInputTokens ||
+      draft.maxOutputTokens !== DEFAULTS.maxOutputTokens,
   );
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -50,7 +59,6 @@ export default function AISettingsPanel({
   const onFormat = (fmt: ProviderFormat) => {
     setDraft(d => {
       const next: AISettings = {...d, format: fmt};
-      // If the user hasn't customised model/base, follow the format defaults.
       if (d.model === DEFAULT_MODEL[d.format]) {
         next.model = DEFAULT_MODEL[fmt];
       }
@@ -63,7 +71,7 @@ export default function AISettingsPanel({
   };
 
   const onSave = () => {
-    saveAISettings(draft);
+    void saveAISettings(draft);
     onClose();
   };
 
@@ -75,7 +83,7 @@ export default function AISettingsPanel({
     setTesting(false);
   };
 
-  const ready = isConfigured(draft);
+  const ready = !!draft.baseURL.trim() && !!draft.model.trim() && !!(draft.apiKey.trim() || draft.hasKey);
 
   return createPortal(
     <div className="ai-overlay" onClick={onClose} role="presentation">
@@ -121,14 +129,16 @@ export default function AISettingsPanel({
           </label>
 
           <label className="ai-field">
-            <span className="ai-label">API key</span>
+            <span className="ai-label">
+              API key {draft.hasKey && !draft.apiKey && <span className="ai-hint">(set — type to replace)</span>}
+            </span>
             <div className="ai-key-row">
               <input
                 className="cp-input"
                 type={showKey ? 'text' : 'password'}
                 value={draft.apiKey}
                 onChange={e => set('apiKey', e.target.value)}
-                placeholder="sk-… / sk-ant-…"
+                placeholder={draft.hasKey ? '••••••••' : 'sk-… / sk-ant-…'}
                 spellCheck={false}
                 autoComplete="off"
               />
@@ -216,14 +226,12 @@ export default function AISettingsPanel({
 
           {!ready && (
             <p className="ai-note">
-              Until base URL, API key, and model are all set, rewriting runs in
-              local demo mode.
+              Until base URL, model, and an API key are set, AI requests will fail.
             </p>
           )}
           <p className="ai-note ai-note--muted">
-            Your key is stored locally in this browser (localStorage) and sent
-            only to the base URL above. For OpenAI’s hosted API use a
-            CORS-enabled endpoint or proxy if calls are blocked by the browser.
+            The key is stored on the backend (not in the browser) and calls go
+            through it, so there's no CORS concern.
           </p>
 
           {testResult && (
@@ -238,11 +246,7 @@ export default function AISettingsPanel({
           <button
             type="button"
             className="cp-button cp-button--ghost"
-            onClick={() => {
-              resetAISettings();
-              setDraft({...DEFAULT_AI_SETTINGS});
-              setTestResult(null);
-            }}>
+            onClick={() => setDraft({...DEFAULTS})}>
             Reset
           </button>
           <div className="ai-footer-right">

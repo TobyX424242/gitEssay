@@ -1,32 +1,37 @@
 /**
  * gitEssay — CheckpointPlugin.
  *
- * Side-effect-only plugin that wires the canonical commit signal
- * (`editor.registerUpdateListener`) to the checkpoint store:
- *  - On mount: `bootstrapDoc` (transactional/idempotent — safe under React
- *    StrictMode's dev double-mount; won't create a duplicate 'init') restores
- *    the current checkpoint so the doc persists across reloads.
- *  - On every content-changing update: debounce (3s idle) an auto-save into the
- *    single rolling auto slot (source 'auto'). `skipIfUnchanged` suppresses
- *    no-op captures (incl. the update fired by bootstrap/restore itself).
- *    Selection-only updates are ignored.
+ * Wires the editor to the backend-backed checkpoint store, scoped to the active
+ * project:
+ *  - On mount / when the active project changes: load that project's current
+ *    checkpoint into the editor (so the doc persists across reloads and project
+ *    switches).
+ *  - On every content-changing update: debounce (3s idle) an auto-save to the
+ *    active project's rolling auto slot. `skipIfUnchanged` suppresses no-op
+ *    captures (incl. the update fired by the load itself). Selection-only
+ *    updates are ignored. The timer is cancelled on project switch.
  */
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {useEffect} from 'react';
 
-import {bootstrapDoc, captureCheckpoint} from '../checkpoints/service';
+import {useActiveProjectId} from '../projects/projectStore';
+import {captureCheckpoint, loadProjectState} from '../checkpoints/service';
 
 const AUTOSAVE_DEBOUNCE_MS = 3000;
 
 export default function CheckpointPlugin(): null {
   const [editor] = useLexicalComposerContext();
+  const activeId = useActiveProjectId();
 
   useEffect(() => {
+    if (!activeId) {
+      return;
+    }
+    void loadProjectState(editor, activeId);
+
     let timer: ReturnType<typeof setTimeout> | null = null;
     let pendingContent = false;
     let cancelled = false;
-
-    void bootstrapDoc(editor);
 
     const flush = () => {
       timer = null;
@@ -58,7 +63,7 @@ export default function CheckpointPlugin(): null {
         clearTimeout(timer);
       }
     };
-  }, [editor]);
+  }, [editor, activeId]);
 
   return null;
 }

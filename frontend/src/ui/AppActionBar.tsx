@@ -23,6 +23,7 @@ import {type JSX, useEffect, useState} from 'react';
 
 import {chatPanel, versionsPanel} from '../chat/panelStore';
 import useModal from '../hooks/useModal';
+import ProjectSwitcher from '../projects/ProjectSwitcher';
 import {docFromHash} from '../utils/docSerialization';
 import Button from './Button';
 import {useSidePanel} from './sidePanelStore';
@@ -70,7 +71,10 @@ export default function AppActionBar(): JSX.Element {
 
   return (
     <div className="app-bar">
-      <span className="app-bar-title">gitEssay</span>
+      <div className="app-bar-left">
+        <span className="app-bar-title">gitEssay</span>
+        <ProjectSwitcher />
+      </div>
       <div className="app-bar-actions">
         <button
           type="button"

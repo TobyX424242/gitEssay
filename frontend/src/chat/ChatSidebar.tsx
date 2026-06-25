@@ -35,6 +35,7 @@ import {
 } from './conversations';
 import {applyTextPatch, plainTextToBlocks} from './patch';
 import {chatPanel, closePanel, openPanel, usePanelOpen, usePanelWidth} from './panelStore';
+import {useActiveProjectId} from '../projects/projectStore';
 import {getActiveChatProvider} from './providers';
 import type {ChatContext, ChatEditState, ChatMessage} from './types';
 import {SidePanelResizer} from '../ui/SidePanelResizer';
@@ -62,6 +63,7 @@ export default function ChatSidebar(): JSX.Element {
   const width = usePanelWidth();
   const settings = useAISettings();
   const configured = isConfigured(settings);
+  const activeProjectId = useActiveProjectId();
   const {conversations, activeId, active} = useConversations();
   const messages = active?.messages ?? [];
 
@@ -77,10 +79,12 @@ export default function ChatSidebar(): JSX.Element {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const trapRef = useScrollTrap();
 
-  // Ensure at least one conversation exists.
+  // Ensure at least one conversation exists for the active project.
   useEffect(() => {
-    bootstrapConversations();
-  }, []);
+    if (activeProjectId) {
+      void bootstrapConversations();
+    }
+  }, [activeProjectId]);
 
   // Reserve editor space + drive the dock width via a CSS var (wide screens only).
   useEffect(() => {

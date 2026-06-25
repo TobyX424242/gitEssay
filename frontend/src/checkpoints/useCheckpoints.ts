@@ -1,11 +1,13 @@
 /**
- * gitEssay — React binding to the checkpoint service. Re-renders the list +
- * current pointer whenever the store changes (capture/restore).
+ * gitEssay — React binding to the checkpoint service, scoped to the active
+ * project. Re-renders the list + current pointer on capture/restore and when
+ * the active project changes.
  */
 import {type LexicalEditor} from 'lexical';
-import {useCallback, useEffect, useSyncExternalStore, useState} from 'react';
+import {useCallback, useEffect, useState, useSyncExternalStore} from 'react';
 
-import {type Checkpoint} from './db';
+import {useActiveProjectId} from '../projects/projectStore';
+import type {Checkpoint} from './types';
 import {
   captureCheckpoint,
   getCurrentId,
@@ -24,6 +26,7 @@ export function useCheckpoints(editor: LexicalEditor): CheckpointsData & {
   save: (label?: string) => Promise<void>;
   restore: (id: string) => Promise<void>;
 } {
+  const activeId = useActiveProjectId();
   const version = useSyncExternalStore(subscribe, getVersion, getVersion);
   const [data, setData] = useState<CheckpointsData>({
     checkpoints: [],
@@ -31,16 +34,22 @@ export function useCheckpoints(editor: LexicalEditor): CheckpointsData & {
   });
 
   useEffect(() => {
+    if (!activeId) {
+      setData({checkpoints: [], currentId: null});
+      return;
+    }
     let alive = true;
-    Promise.all([listCheckpoints(), getCurrentId()]).then(([list, currentId]) => {
-      if (alive) {
-        setData({checkpoints: list, currentId});
-      }
-    });
+    Promise.all([listCheckpoints(activeId), getCurrentId(activeId)]).then(
+      ([list, currentId]) => {
+        if (alive) {
+          setData({checkpoints: list, currentId});
+        }
+      },
+    );
     return () => {
       alive = false;
     };
-  }, [editor, version]);
+  }, [activeId, version]);
 
   const save = useCallback(
     (label?: string) => captureCheckpoint(editor, {source: 'manual', label}),
