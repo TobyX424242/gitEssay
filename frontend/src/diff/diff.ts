@@ -116,7 +116,7 @@ export function diffBlocks(oldB: DiffBlock[], newB: DiffBlock[]): BlockOp[] {
 }
 
 // --- word-level (intra-block) --------------------------------------------
-const WORD_RE = /[\wÀ-ɏ]+|\s+|[^\s\wÀ-ɏ]+/g;
+const WORD_RE = /[\wÀ-ɏ]+|\s+|\p{sc=Han}|[^\s\wÀ-ɏ\p{sc=Han}]+/gu;
 
 interface WordToken {
   key: string;
