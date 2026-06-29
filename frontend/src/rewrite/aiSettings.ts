@@ -34,7 +34,7 @@ export const DEFAULT_BASE: Record<ProviderFormat, string> = {
   anthropic: 'https://api.anthropic.com',
 };
 
-const DEFAULTS: AISettings = {
+export const DEFAULT_SETTINGS: AISettings = {
   format: 'openai',
   baseURL: DEFAULT_BASE.openai,
   apiKey: '',
@@ -83,7 +83,7 @@ export function toApiBody(s: AISettings): Record<string, unknown> {
 }
 
 // --- cache + pub/sub -------------------------------------------------------
-let cache: AISettings = {...DEFAULTS};
+let cache: AISettings = {...DEFAULT_SETTINGS};
 let version = 0;
 const listeners = new Set<() => void>();
 

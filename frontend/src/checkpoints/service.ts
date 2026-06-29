@@ -144,14 +144,11 @@ export async function restoreCheckpoint(
   emit();
 }
 
-/** Load a project's current checkpoint into the editor (used on project open). */
-export async function loadProjectState(
-  editor: LexicalEditor,
+/** Fetch a project's current checkpoint (or null). The caller applies it, so a
+ *  stale load (e.g. a rapid project switch) can be discarded via a guard. */
+export async function getCurrentCheckpoint(
   projectId: string,
-): Promise<void> {
+): Promise<Checkpoint | null> {
   const c = await api.get<ApiCheckpoint | null>(`/projects/${projectId}/current`);
-  if (c) {
-    editor.setEditorState(editor.parseEditorState(c.state));
-    editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined);
-  }
+  return c ? map(c) : null;
 }

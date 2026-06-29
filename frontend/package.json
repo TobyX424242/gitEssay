@@ -39,7 +39,6 @@
     "@lexical/utils": "0.45.1-nightly.20260623.0",
     "@types/diff": "^7.0.2",
     "date-fns": "^4.1.0",
-    "dexie": "^4.4.4",
     "diff": "^9.0.0",
     "katex": "^0.16.10",
     "lexical": "0.45.1-nightly.20260623.0",

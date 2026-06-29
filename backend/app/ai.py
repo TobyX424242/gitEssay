@@ -41,6 +41,21 @@ def call_model(s, system: str, user: str) -> str:
     return _openai(s, system, user)
 
 
+def _content_to_text(content) -> str:
+    """OpenAI-compatible message content is usually a string, but some gateways
+    return a list of content parts (e.g. [{"type":"text","text":"…"}]). Collapse
+    either shape to plain text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") in (None, "text")
+        )
+    return ""
+
+
 def _openai(s, system: str, user: str) -> str:
     body = {
         "model": s.model,
@@ -62,10 +77,11 @@ def _openai(s, system: str, user: str) -> str:
     data = r.json()
     choices = data.get("choices") or []
     content = (((choices[0] if choices else {}).get("message") or {}).get("content"))
-    if not isinstance(content, str) or not content.strip():
+    text = _content_to_text(content)
+    if not text.strip():
         finish = (choices[0] if choices else {}).get("finish_reason", "unknown")
         raise RuntimeError(f"model returned no text (finish_reason: {finish})")
-    return content
+    return text
 
 
 def _anthropic(s, system: str, user: str) -> str:

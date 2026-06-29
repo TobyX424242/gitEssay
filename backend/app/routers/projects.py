@@ -1,21 +1,15 @@
 """gitEssay backend — projects router."""
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app import schemas
 from app.db import get_db
+from app.deps import get_project_or_404
 from app.models import EMPTY_STATE, Checkpoint, Conversation, Project, new_id, now_ms
 
 router = APIRouter(tags=["projects"])
-
-
-def _get_project(db: Session, pid: str) -> Project:
-    p = db.get(Project, pid)
-    if p is None:
-        raise HTTPException(status_code=404, detail="project not found")
-    return p
 
 
 @router.get("/projects", response_model=list[schemas.ProjectOut])
@@ -55,14 +49,14 @@ def create_project(body: schemas.ProjectCreate, db: Session = Depends(get_db)):
 
 @router.get("/projects/{pid}", response_model=schemas.ProjectOut)
 def get_project(pid: str, db: Session = Depends(get_db)):
-    return _get_project(db, pid)
+    return get_project_or_404(db, pid)
 
 
 @router.patch("/projects/{pid}", response_model=schemas.ProjectOut)
 def rename_project(
     pid: str, body: schemas.ProjectRename, db: Session = Depends(get_db)
 ):
-    project = _get_project(db, pid)
+    project = get_project_or_404(db, pid)
     project.name = body.name
     project.updated_at = now_ms()
     db.commit()
@@ -71,7 +65,7 @@ def rename_project(
 
 @router.delete("/projects/{pid}")
 def delete_project(pid: str, db: Session = Depends(get_db)):
-    project = _get_project(db, pid)
+    project = get_project_or_404(db, pid)
     db.query(Checkpoint).filter_by(project_id=pid).delete()
     db.query(Conversation).filter_by(project_id=pid).delete()
     db.delete(project)

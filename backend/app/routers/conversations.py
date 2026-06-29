@@ -11,16 +11,10 @@ from sqlalchemy.orm import Session
 
 from app import schemas
 from app.db import get_db
+from app.deps import get_project_or_404
 from app.models import Conversation, Project, new_id, now_ms
 
 router = APIRouter(tags=["conversations"])
-
-
-def _project(db: Session, pid: str) -> Project:
-    p = db.get(Project, pid)
-    if p is None:
-        raise HTTPException(status_code=404, detail="project not found")
-    return p
 
 
 def to_out(c: Conversation) -> dict:
@@ -38,7 +32,7 @@ def to_out(c: Conversation) -> dict:
     "/projects/{pid}/conversations", response_model=list[schemas.ConversationOut]
 )
 def list_conversations(pid: str, db: Session = Depends(get_db)):
-    _project(db, pid)
+    get_project_or_404(db, pid)
     rows = (
         db.query(Conversation)
         .filter_by(project_id=pid)
@@ -54,7 +48,7 @@ def list_conversations(pid: str, db: Session = Depends(get_db)):
 def create_conversation(
     pid: str, body: schemas.ConversationCreate, db: Session = Depends(get_db)
 ):
-    project = _project(db, pid)
+    project = get_project_or_404(db, pid)
     cid = new_id()
     now = now_ms()
     conv = Conversation(
@@ -78,7 +72,11 @@ def create_conversation(
 def set_active_conversation(
     pid: str, body: schemas.SetActive, db: Session = Depends(get_db)
 ):
-    project = _project(db, pid)
+    project = get_project_or_404(db, pid)
+    # Reject ids that don't belong to this project (foreign / deleted / garbage).
+    conv = db.get(Conversation, body.id)
+    if conv is None or conv.project_id != pid:
+        raise HTTPException(status_code=404, detail="conversation not found")
     project.active_conversation_id = body.id
     db.commit()
     return project
@@ -130,6 +128,8 @@ def replace_message(
     if conv is None:
         raise HTTPException(status_code=404, detail="conversation not found")
     msgs = json.loads(conv.messages)
+    if not any(isinstance(m, dict) and m.get("id") == mid for m in msgs):
+        raise HTTPException(status_code=404, detail="message not found")
     msgs = [body.message if (isinstance(m, dict) and m.get("id") == mid) else m for m in msgs]
     conv.messages = json.dumps(msgs)
     conv.updated_at = now_ms()
@@ -148,10 +148,14 @@ def set_edit_state(
     if conv is None:
         raise HTTPException(status_code=404, detail="conversation not found")
     msgs = json.loads(conv.messages)
+    applied = False
     for m in msgs:
         if isinstance(m, dict) and m.get("id") == mid and isinstance(m.get("edits"), list):
             if 0 <= idx < len(m["edits"]):
                 m["edits"][idx]["state"] = body.state
+                applied = True
+    if not applied:
+        raise HTTPException(status_code=404, detail="edit not found")
     conv.messages = json.dumps(msgs)
     conv.updated_at = now_ms()
     db.commit()

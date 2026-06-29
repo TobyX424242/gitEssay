@@ -10,6 +10,7 @@ import {useEffect, useState, useSyncExternalStore} from 'react';
 
 import {
   getActiveProjectId,
+  loadProjects,
   useActiveProjectId,
   useProjects,
 } from '../projects/projectStore';
@@ -74,6 +75,9 @@ export async function createConversation(
   const c = await api.post<ApiConversation>(`/projects/${pid}/conversations`, {
     title: title ?? null,
   });
+  // createConversation sets the project's active_conversation_id server-side;
+  // refresh the project store so useConversations re-derives the active one.
+  void loadProjects();
   emit();
   return c;
 }
@@ -84,6 +88,7 @@ export async function setActiveConversation(id: string): Promise<void> {
     return;
   }
   await api.post(`/projects/${pid}/conversations/active`, {id});
+  void loadProjects();
   emit();
 }
 
@@ -122,6 +127,7 @@ export async function setEditState(
 
 export async function deleteConversation(id: string): Promise<void> {
   await api.del(`/conversations/${id}`);
+  void loadProjects();
   emit();
 }
 

@@ -83,7 +83,8 @@ export function createChatLLMProvider(s: AISettings): ChatProvider {
         system: PATCH_SYSTEM_PROMPT,
         user: buildUserMessage(ctx),
       });
-      return sanitize(parsePatches(raw));
+      const {prose, edits} = parsePatches(raw);
+      return sanitize({text: prose, edits});
     },
   };
 }

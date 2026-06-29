@@ -14,16 +14,10 @@ from sqlalchemy.orm import Session
 
 from app import schemas
 from app.db import get_db
-from app.models import Checkpoint, Project, auto_slot_id, new_id, now_ms
+from app.deps import get_project_or_404
+from app.models import Checkpoint, auto_slot_id, new_id, now_ms
 
 router = APIRouter(tags=["checkpoints"])
-
-
-def _get_project(db: Session, pid: str) -> Project:
-    p = db.get(Project, pid)
-    if p is None:
-        raise HTTPException(status_code=404, detail="project not found")
-    return p
 
 
 def to_out(cp: Checkpoint) -> dict:
@@ -53,7 +47,7 @@ def _latest_durable_id(db: Session, pid: str) -> Optional[str]:
 
 @router.get("/projects/{pid}/checkpoints", response_model=list[schemas.CheckpointOut])
 def list_checkpoints(pid: str, db: Session = Depends(get_db)):
-    _get_project(db, pid)
+    get_project_or_404(db, pid)
     rows = (
         db.query(Checkpoint)
         .filter_by(project_id=pid)
@@ -65,7 +59,7 @@ def list_checkpoints(pid: str, db: Session = Depends(get_db)):
 
 @router.get("/projects/{pid}/current", response_model=Optional[schemas.CheckpointOut])
 def get_current(pid: str, db: Session = Depends(get_db)):
-    project = _get_project(db, pid)
+    project = get_project_or_404(db, pid)
     if not project.current_checkpoint_id:
         return None
     cp = db.get(Checkpoint, project.current_checkpoint_id)
@@ -76,7 +70,7 @@ def get_current(pid: str, db: Session = Depends(get_db)):
 def capture_checkpoint(
     pid: str, body: schemas.CheckpointCapture, db: Session = Depends(get_db)
 ):
-    project = _get_project(db, pid)
+    project = get_project_or_404(db, pid)
     current = (
         db.get(Checkpoint, project.current_checkpoint_id)
         if project.current_checkpoint_id
@@ -143,7 +137,7 @@ def capture_checkpoint(
     "/projects/{pid}/checkpoints/{cid}/restore", response_model=schemas.CheckpointOut
 )
 def restore_checkpoint(pid: str, cid: str, db: Session = Depends(get_db)):
-    project = _get_project(db, pid)
+    project = get_project_or_404(db, pid)
     cp = db.get(Checkpoint, cid)
     if cp is None or cp.project_id != pid:
         raise HTTPException(status_code=404, detail="checkpoint not found")

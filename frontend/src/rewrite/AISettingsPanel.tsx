@@ -13,23 +13,13 @@ import {
   type ProviderFormat,
   DEFAULT_BASE,
   DEFAULT_MODEL,
+  DEFAULT_SETTINGS,
   isConfigured,
   saveAISettings,
   useAISettings,
 } from './aiSettings';
 import {testConnection} from './llmClient';
 import './aiSettings.css';
-
-const DEFAULTS: AISettings = {
-  format: 'openai',
-  baseURL: DEFAULT_BASE.openai,
-  apiKey: '',
-  hasKey: false,
-  model: DEFAULT_MODEL.openai,
-  temperature: 0.7,
-  maxInputTokens: 16000,
-  maxOutputTokens: 8000,
-};
 
 export default function AISettingsPanel({
   onClose,
@@ -41,9 +31,9 @@ export default function AISettingsPanel({
   const [showKey, setShowKey] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(
     () =>
-      draft.temperature !== DEFAULTS.temperature ||
-      draft.maxInputTokens !== DEFAULTS.maxInputTokens ||
-      draft.maxOutputTokens !== DEFAULTS.maxOutputTokens,
+      draft.temperature !== DEFAULT_SETTINGS.temperature ||
+      draft.maxInputTokens !== DEFAULT_SETTINGS.maxInputTokens ||
+      draft.maxOutputTokens !== DEFAULT_SETTINGS.maxOutputTokens,
   );
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -54,6 +44,19 @@ export default function AISettingsPanel({
   const set = <K extends keyof AISettings>(key: K, value: AISettings[K]) => {
     setDraft(d => ({...d, [key]: value}));
     setTestResult(null);
+  };
+
+  /** Only update a numeric field when the input parses to a valid value — never
+   *  let a cleared field coerce to 0 (which would send max_tokens=0). */
+  const setNumber = (
+    key: 'temperature' | 'maxInputTokens' | 'maxOutputTokens',
+    raw: string,
+    validate: (n: number) => boolean,
+  ) => {
+    const n = Number.parseFloat(raw);
+    if (!Number.isNaN(n) && validate(n)) {
+      set(key, n);
+    }
   };
 
   const onFormat = (fmt: ProviderFormat) => {
@@ -185,7 +188,7 @@ export default function AISettingsPanel({
                   step={0.1}
                   value={draft.temperature}
                   onChange={e =>
-                    set('temperature', Number.parseFloat(e.target.value) || 0)
+                    setNumber('temperature', e.target.value, n => n >= 0 && n <= 2)
                   }
                 />
               </label>
@@ -201,7 +204,7 @@ export default function AISettingsPanel({
                   step={512}
                   value={draft.maxInputTokens}
                   onChange={e =>
-                    set('maxInputTokens', Number.parseInt(e.target.value, 10) || 0)
+                    setNumber('maxInputTokens', e.target.value, n => n >= 1)
                   }
                 />
               </label>
@@ -217,7 +220,7 @@ export default function AISettingsPanel({
                   step={256}
                   value={draft.maxOutputTokens}
                   onChange={e =>
-                    set('maxOutputTokens', Number.parseInt(e.target.value, 10) || 0)
+                    setNumber('maxOutputTokens', e.target.value, n => n >= 1)
                   }
                 />
               </label>
@@ -246,7 +249,7 @@ export default function AISettingsPanel({
           <button
             type="button"
             className="cp-button cp-button--ghost"
-            onClick={() => setDraft({...DEFAULTS})}>
+            onClick={() => setDraft({...DEFAULT_SETTINGS})}>
             Reset
           </button>
           <div className="ai-footer-right">

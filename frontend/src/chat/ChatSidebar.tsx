@@ -235,15 +235,16 @@ export default function ChatSidebar(): JSX.Element {
 
   const acceptEdit = useCallback(
     async (msgId_: string, editIdx: number, search: string, replace: string) => {
-      if (!active) {
+      const convId = active?.id;
+      if (!convId) {
         return;
       }
       const res = await applyTextPatch(editor, search, replace);
       if (res.ok) {
         await captureCheckpoint(editor, {source: 'ai-accept', label: 'AI chat edit'});
-        void setEditState(active.id, msgId_, editIdx, 'applied');
+        void setEditState(convId, msgId_, editIdx, 'applied');
       } else {
-        void setEditState(active.id, msgId_, editIdx, 'unlocatable');
+        void setEditState(convId, msgId_, editIdx, 'unlocatable');
       }
     },
     [active, editor],

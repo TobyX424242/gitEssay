@@ -52,7 +52,9 @@ export function useCheckpoints(editor: LexicalEditor): CheckpointsData & {
   }, [activeId, version]);
 
   const save = useCallback(
-    (label?: string) => captureCheckpoint(editor, {source: 'manual', label}),
+    async (label?: string) => {
+      await captureCheckpoint(editor, {source: 'manual', label});
+    },
     [editor],
   );
   const restore = useCallback(

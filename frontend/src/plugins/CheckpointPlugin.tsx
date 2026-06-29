@@ -3,19 +3,21 @@
  *
  * Wires the editor to the backend-backed checkpoint store, scoped to the active
  * project:
- *  - On mount / when the active project changes: load that project's current
- *    checkpoint into the editor (so the doc persists across reloads and project
- *    switches).
+ *  - On mount / when the active project changes: fetch that project's current
+ *    checkpoint and load it into the editor. A `cancelled` guard discards a
+ *    stale fetch if the user switches projects again before it resolves (so a
+ *    slow A→B→C switch can't clobber the editor with A's content).
  *  - On every content-changing update: debounce (3s idle) an auto-save to the
- *    active project's rolling auto slot. `skipIfUnchanged` suppresses no-op
- *    captures (incl. the update fired by the load itself). Selection-only
- *    updates are ignored. The timer is cancelled on project switch.
+ *    active project's rolling auto slot (projectId captured per-effect so the
+ *    save can never land in the wrong project). `skipIfUnchanged` suppresses
+ *    no-op captures (incl. the update fired by the load itself).
  */
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
+import {CLEAR_HISTORY_COMMAND} from 'lexical';
 import {useEffect} from 'react';
 
 import {useActiveProjectId} from '../projects/projectStore';
-import {captureCheckpoint, loadProjectState} from '../checkpoints/service';
+import {captureCheckpoint, getCurrentCheckpoint} from '../checkpoints/service';
 
 const AUTOSAVE_DEBOUNCE_MS = 3000;
 
@@ -27,11 +29,19 @@ export default function CheckpointPlugin(): null {
     if (!activeId) {
       return;
     }
-    void loadProjectState(editor, activeId);
+    let cancelled = false;
+
+    // Load the project's current doc; discard if superseded by a later switch.
+    void getCurrentCheckpoint(activeId).then(cp => {
+      if (cancelled || !cp) {
+        return;
+      }
+      editor.setEditorState(editor.parseEditorState(cp.state));
+      editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined);
+    });
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     let pendingContent = false;
-    let cancelled = false;
 
     const flush = () => {
       timer = null;
@@ -39,7 +49,11 @@ export default function CheckpointPlugin(): null {
         return;
       }
       pendingContent = false;
-      void captureCheckpoint(editor, {source: 'auto', skipIfUnchanged: true});
+      void captureCheckpoint(editor, {
+        source: 'auto',
+        skipIfUnchanged: true,
+        projectId: activeId,
+      });
     };
 
     const schedule = () => {
