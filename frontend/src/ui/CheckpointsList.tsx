@@ -9,8 +9,52 @@ import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {type JSX, useState} from 'react';
 
 import {useCheckpoints} from '../checkpoints/useCheckpoints';
+import type {Checkpoint} from '../checkpoints/types';
 import {LATEST_ID, useCompareMode} from './CompareMode';
 import './CheckpointsPanel.css';
+
+type SourceFilter = 'all' | 'manual' | 'ai';
+
+/**
+ * Split `text` into plain runs + highlighted <mark> runs for each occurrence of
+ * `query`. Honours the case-sensitivity flag so the highlight matches the same
+ * occurrences the filter matched. Returns the text unchanged when the query is
+ * empty (no search active).
+ */
+function highlightMatches(
+  text: string,
+  query: string,
+  caseSensitive: boolean,
+): Array<string | JSX.Element> {
+  const q = query.trim();
+  if (!q) {
+    return [text];
+  }
+  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(escaped, caseSensitive ? 'g' : 'gi');
+  const parts: Array<string | JSX.Element> = [];
+  let last = 0;
+  let key = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) {
+      parts.push(text.slice(last, m.index));
+    }
+    parts.push(
+      <mark className="cp-highlight" key={key++}>
+        {m[0]}
+      </mark>,
+    );
+    last = m.index + m[0].length;
+    if (m[0].length === 0) {
+      re.lastIndex++; // guard against a zero-length match looping forever
+    }
+  }
+  if (last < text.length) {
+    parts.push(text.slice(last));
+  }
+  return parts;
+}
 
 export default function CheckpointsList({
   onCompare,
@@ -23,6 +67,32 @@ export default function CheckpointsList({
   const [label, setLabel] = useState('');
   const {enter: enterCompare, active: compareActive, exit: exitCompare} =
     useCompareMode();
+
+  // Search + filter state for the list.
+  const [query, setQuery] = useState('');
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [filter, setFilter] = useState<SourceFilter>('all');
+
+  const matchesQuery = (cp: Checkpoint): boolean => {
+    const q = query.trim();
+    if (!q) {
+      return true;
+    }
+    const hay = cp.label ?? '';
+    return caseSensitive
+      ? hay.includes(q)
+      : hay.toLowerCase().includes(q.toLowerCase());
+  };
+  const matchesFilter = (cp: Checkpoint): boolean => {
+    if (filter === 'manual') {
+      return cp.source === 'manual';
+    }
+    if (filter === 'ai') {
+      return cp.source === 'ai-accept';
+    }
+    return true; // 'all'
+  };
+  const filtered = checkpoints.filter(cp => matchesFilter(cp) && matchesQuery(cp));
 
   return (
     <>
@@ -76,11 +146,53 @@ export default function CheckpointsList({
         )}
       </div>
 
+      <div className="cp-filter-row">
+        <div className="cp-search">
+          <input
+            className="cp-input cp-search-input"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search labels…"
+            aria-label="Search checkpoint labels"
+          />
+          <button
+            type="button"
+            className={`cp-case-toggle${caseSensitive ? ' is-active' : ''}`}
+            onClick={() => setCaseSensitive(v => !v)}
+            aria-pressed={caseSensitive}
+            title={
+              caseSensitive
+                ? 'Case-sensitive search — click for case-insensitive'
+                : 'Case-insensitive search — click for case-sensitive'
+            }>
+            Aa
+          </button>
+        </div>
+        <div
+          className="cp-segmented"
+          role="group"
+          aria-label="Filter checkpoints by source">
+          {(['all', 'manual', 'ai'] as const).map(f => (
+            <button
+              key={f}
+              type="button"
+              className={`cp-seg${filter === f ? ' is-active' : ''}`}
+              onClick={() => setFilter(f)}
+              aria-pressed={filter === f}>
+              {f === 'all' ? 'All' : f === 'manual' ? 'Manual' : 'AI'}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <ul className="cp-list">
         {checkpoints.length === 0 && (
           <li className="cp-empty">No checkpoints yet.</li>
         )}
-        {checkpoints.map(cp => {
+        {checkpoints.length > 0 && filtered.length === 0 && (
+          <li className="cp-empty">No checkpoints match your search.</li>
+        )}
+        {filtered.map(cp => {
           const isCurrent = cp.id === currentId;
           return (
             <li
@@ -96,10 +208,25 @@ export default function CheckpointsList({
                     : cp.source === 'init'
                       ? 'initial'
                       : cp.source}
-                  {cp.label ? ` · ${cp.label}` : ''}
                 </span>
+                {cp.label && (
+                  <span className="cp-label">
+                    {' · '}
+                    {highlightMatches(cp.label, query, caseSensitive)}
+                  </span>
+                )}
               </div>
               <div className="cp-row-actions">
+                <button
+                  type="button"
+                  className="cp-button cp-button--ghost"
+                  title="Compare this checkpoint against the live editor"
+                  onClick={() => {
+                    enterCompare(cp.id, LATEST_ID);
+                    onCompare?.();
+                  }}>
+                  Compare
+                </button>
                 {isCurrent ? (
                   <span className="cp-current-tag">current</span>
                 ) : (

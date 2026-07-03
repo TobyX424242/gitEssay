@@ -99,6 +99,71 @@
   overflow-y: auto;
   flex: 1;
 }
+
+/* search + source-filter toolbar */
+.cp-filter-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--ge-border);
+}
+.cp-search {
+  display: flex;
+  gap: 6px;
+}
+.cp-search-input {
+  flex: 1;
+  min-width: 0;
+}
+/* Case-sensitivity toggle. Inactive = case-insensitive (muted); active = case-sensitive. */
+.cp-case-toggle {
+  flex-shrink: 0;
+  border: 1px solid var(--ge-border);
+  background: var(--ge-surface);
+  color: var(--ge-text-muted);
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.cp-case-toggle:hover {
+  color: var(--ge-text);
+}
+.cp-case-toggle.is-active {
+  background: var(--ge-accent);
+  color: #fff;
+  border-color: var(--ge-accent);
+}
+/* Segmented All / Manual / AI filter. */
+.cp-segmented {
+  display: flex;
+  gap: 2px;
+  background: var(--ge-surface-2);
+  border: 1px solid var(--ge-border);
+  border-radius: 7px;
+  padding: 2px;
+}
+.cp-seg {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--ge-text-muted);
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.cp-seg:hover {
+  color: var(--ge-text);
+}
+.cp-seg.is-active {
+  background: var(--ge-surface);
+  color: var(--ge-text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+}
 .cp-item {
   display: flex;
   align-items: center;
@@ -112,6 +177,17 @@
 }
 .cp-item--current {
   background: var(--ge-surface-2);
+}
+.cp-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+/* Compact Compare/Restore so both fit side-by-side in the narrow dock. */
+.cp-row-actions .cp-button {
+  padding: 4px 9px;
+  font-size: 12px;
 }
 .cp-meta {
   display: flex;
@@ -128,6 +204,22 @@
   color: var(--ge-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.3px;
+}
+/* The descriptive label detail — intentionally NOT uppercased (only the source
+   tag above is). Keeps commit-style messages like "Tighten topic sentence"
+   readable instead of "TIGHTEN TOPIC SENTENCE". */
+.cp-label {
+  font-size: 11px;
+  color: var(--ge-text-muted);
+  letter-spacing: 0;
+}
+/* Matched search term inside a label. Themed (accent-tinted) so it reads in both
+   light/dark instead of the browser's hard default yellow. */
+.cp-highlight {
+  background: color-mix(in srgb, var(--ge-accent) 30%, transparent);
+  color: var(--ge-text);
+  border-radius: 2px;
+  padding: 0 1px;
 }
 .cp-current-tag {
   font-size: 11px;
