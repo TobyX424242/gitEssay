@@ -5,11 +5,27 @@
   --ge-app-bar-height: 44px;
 }
 
+/* The app bar spans the FULL viewport width, sitting ABOVE the side docks (the
+   docks start at top: --app-bar-h). This is deliberate: the docks must not
+   squeeze the bar's tools, so the ⋮ overflow only kicks in when the viewport
+   itself is genuinely small — not merely because a dock is open. All in-flow
+   content is pushed down by the bar's live height. */
+#root {
+  padding-top: var(--app-bar-h, var(--ge-app-bar-height));
+}
+
 .app-bar {
-  position: sticky;
+  position: fixed;
+  left: 0;
+  right: 0;
   top: 0;
   z-index: 100;
-  height: var(--ge-app-bar-height);
+  /* height: auto so the bar can grow when the overflow row wrap-expands (⋮);
+     min-height keeps the normal 44px look. The live height is published as
+     --app-bar-h (see AppActionBar) so the formatting toolbar + docks sit
+     below it. */
+  height: auto;
+  min-height: var(--ge-app-bar-height);
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -24,6 +40,7 @@
   font-weight: 700;
   font-size: 15px;
   letter-spacing: 0.2px;
+  flex-shrink: 0;
 }
 .app-bar-left {
   display: flex;
@@ -31,10 +48,24 @@
   gap: 12px;
   min-width: 0;
 }
+/* The actions row is an OverflowToolbar: it grows to fill the available width
+   (flex:1) so its clientWidth reflects the real space — that's what the overflow
+   measurement compares against. min-width:0 lets it shrink; justify-content
+   flex-end right-aligns the buttons. */
 .app-bar-actions {
   display: flex;
   align-items: center;
   gap: 2px;
+  justify-content: flex-end;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+.app-bar-actions.is-expanded {
+  flex-wrap: wrap;
+  overflow: visible;
+  justify-content: flex-end;
 }
 
 .app-bar i {

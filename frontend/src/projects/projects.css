@@ -5,6 +5,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 .proj-switcher-btn {
   display: flex;
@@ -18,6 +19,7 @@
   font-size: 13px;
   cursor: pointer;
   max-width: 220px;
+  min-width: 0;
 }
 .proj-switcher-btn:hover:not(:disabled) {
   background: var(--ge-surface-2);

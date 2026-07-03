@@ -24,29 +24,11 @@
   color: #333;
 }
 
-/* --- Theme toggle button (bottom-left corner) --- */
-.theme-toggle {
-  position: fixed;
-  bottom: 16px;
-  left: 16px;
-  z-index: 200;
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  border: 1px solid #ccc;
-  background: #fff;
-  color: #333;
-  cursor: pointer;
-  font-size: 17px;
+/* The theme toggle now lives in the top app bar as an `.app-bar-btn` (see
+   ui/AppActionBar.tsx + ui/ThemeToggle.tsx). Only its glyph sizing lives here. */
+.theme-glyph {
+  font-size: 15px;
   line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-.theme-toggle:hover {
-  background: #eee;
 }
 
 /* ===================================================================== */
@@ -121,31 +103,48 @@
 [data-theme='dark'] .typeahead-popover,
 [data-theme='dark'] .link-editor,
 [data-theme='dark'] .floating-text-format-popup {
-  background: var(--ge-surface-2);
+  background: var(--ge-surface);
   color: var(--ge-text);
   border: 1px solid var(--ge-border);
+  /* Drop the playground's `inset 0 0 0 1px rgba(255,255,255,.5)` hairline and
+     the light-mode shadow — both read as a bright white edge on dark. */
+  box-shadow:
+    0 12px 28px 0 rgba(0, 0, 0, 0.45),
+    0 2px 4px 0 rgba(0, 0, 0, 0.3);
 }
+/* THE FIX: the base `.dropdown .item` sets `background-color:#fff`, which the
+   old dark rule never overrode — so every menu item (Insert / Align / Font /
+   Heading / case…) stayed a white box with light-grey text = unreadable. Force
+   the item background transparent so the dark dropdown surface shows through. */
 [data-theme='dark'] .dropdown .item,
 [data-theme='dark'] .typeahead-popover li {
   color: var(--ge-text);
+  background-color: transparent;
 }
 [data-theme='dark'] .dropdown .item:hover,
 [data-theme='dark'] .dropdown .item.dropdown-item-active,
 [data-theme='dark'] .typeahead-popover li.selected,
 [data-theme='dark'] .typeahead-popover li.active,
 [data-theme='dark'] .popup-item:hover {
-  background: var(--ge-surface);
+  background: var(--ge-surface-2);
+}
+[data-theme='dark'] .dropdown .item .shortcut {
+  color: var(--ge-text-muted);
+}
+/* Divider inside a dropdown is `background-color:#eee` (a bright line on dark). */
+[data-theme='dark'] .dropdown .divider {
+  background-color: var(--ge-border);
 }
 [data-theme='dark'] .link-editor .link-input,
 [data-theme='dark'] .link-editor input {
   color: var(--ge-text);
-  background: var(--ge-surface);
+  background: var(--ge-surface-2);
 }
 [data-theme='dark'] .popup-item {
   color: var(--ge-text);
 }
 [data-theme='dark'] .popup-item.active {
-  background: var(--ge-surface);
+  background: var(--ge-surface-2);
 }
 
 /* Actions (bottom-right) */
@@ -209,16 +208,6 @@
 }
 [data-theme='dark'] .Modal__title {
   color: var(--ge-text);
-}
-
-/* Theme toggle in dark */
-[data-theme='dark'] .theme-toggle {
-  background: var(--ge-surface-2);
-  color: var(--ge-text);
-  border-color: var(--ge-border);
-}
-[data-theme='dark'] .theme-toggle:hover {
-  background: var(--ge-surface);
 }
 
 /* Native selection + scrollbars follow the scheme */

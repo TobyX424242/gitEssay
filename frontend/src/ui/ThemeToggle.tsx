@@ -1,9 +1,14 @@
 /**
- * gitEssay — corner theme toggle (light ⇄ dark). Default is dark.
+ * gitEssay — theme toggle (light ⇄ dark). Default is dark.
  *
  * The initial `data-theme` is set by an inline script in index.html (before
  * paint, no flash) reading localStorage('gitessay-theme'). This component only
  * flips it and persists the choice.
+ *
+ * Rendered inside the top app bar (next to the AI / Versions toggles) as an
+ * `.app-bar-btn`. The glyph is a text char (not an `<i>` SVG icon), so it
+ * inherits `color: var(--ge-text)` and reads correctly in both modes (the dark
+ * `filter: invert(1)` only targets `<i>` chrome icons).
  */
 import {type JSX, useEffect, useState} from 'react';
 
@@ -35,11 +40,13 @@ export default function ThemeToggle(): JSX.Element {
   return (
     <button
       type="button"
-      className="theme-toggle"
+      className="app-bar-btn"
       title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       onClick={() => setTheme(isDark ? 'light' : 'dark')}>
-      <span aria-hidden="true">{isDark ? '☀' : '☾'}</span>
+      <span aria-hidden="true" className="theme-glyph">
+        {isDark ? '☀' : '☾'}
+      </span>
     </button>
   );
 }

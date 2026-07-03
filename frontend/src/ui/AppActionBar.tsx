@@ -19,14 +19,16 @@ import {
   CLEAR_HISTORY_COMMAND,
   type LexicalEditor,
 } from 'lexical';
-import {type JSX, useEffect, useState} from 'react';
+import {type JSX, useEffect, useLayoutEffect, useRef, useState} from 'react';
 
 import {chatPanel, versionsPanel} from '../chat/panelStore';
 import useModal from '../hooks/useModal';
 import ProjectSwitcher from '../projects/ProjectSwitcher';
 import {docFromHash} from '../utils/docSerialization';
 import Button from './Button';
+import OverflowToolbar from './OverflowToolbar';
 import {useSidePanel} from './sidePanelStore';
+import ThemeToggle from './ThemeToggle';
 import './appBar.css';
 
 export default function AppActionBar(): JSX.Element {
@@ -36,6 +38,30 @@ export default function AppActionBar(): JSX.Element {
   const [modal, showModal] = useModal();
   const chat = useSidePanel(chatPanel);
   const versions = useSidePanel(versionsPanel);
+  const barRef = useRef<HTMLDivElement>(null);
+
+  // Publish the app bar's live height so the sticky formatting toolbar (and
+  // anything else that uses --app-bar-h) sticks just below it. The bar grows
+  // when its overflow row wrap-expands (⋮); this keeps the toolbar tracking.
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    if (!bar) {
+      return;
+    }
+    const sync = () => {
+      const h = bar.getBoundingClientRect().height;
+      if (h > 0) {
+        document.documentElement.style.setProperty('--app-bar-h', `${h}px`);
+      }
+    };
+    const ro = new ResizeObserver(sync);
+    ro.observe(bar);
+    sync();
+    return () => {
+      ro.disconnect();
+      document.documentElement.style.removeProperty('--app-bar-h');
+    };
+  }, []);
 
   // Restore editor state from a #doc= share hash if present.
   useEffect(() => {
@@ -70,12 +96,17 @@ export default function AppActionBar(): JSX.Element {
   }, [editor]);
 
   return (
-    <div className="app-bar">
+    <div className="app-bar" ref={barRef}>
       <div className="app-bar-left">
         <span className="app-bar-title">gitEssay</span>
         <ProjectSwitcher />
       </div>
-      <div className="app-bar-actions">
+      <OverflowToolbar
+        className="app-bar-actions"
+        buttonClassName="app-bar-btn app-bar-overflow"
+        dividerClassName="app-bar-divider"
+        moreLabel="More actions"
+        lessLabel="Collapse">
         <button
           type="button"
           className="app-bar-btn"
@@ -135,7 +166,9 @@ export default function AppActionBar(): JSX.Element {
           aria-label="Toggle AI chat sidebar">
           <i className="rewrite" />
         </button>
-      </div>
+        <span className="app-bar-divider" />
+        <ThemeToggle />
+      </OverflowToolbar>
       {modal}
     </div>
   );

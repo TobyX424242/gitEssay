@@ -70,7 +70,7 @@
 /* ---- Left Versions dock ---- */
 .versions-dock {
   position: fixed;
-  top: 0;
+  top: var(--app-bar-h, var(--ge-app-bar-height));
   left: 0;
   bottom: 0;
   width: var(--ge-versions-width, 340px);

@@ -53,7 +53,6 @@ import {TabFocusExtension} from './plugins/TabFocusExtension';
 import {TerseExportExtension} from './plugins/TerseExportExtension';
 import PlaygroundEditorTheme from './themes/PlaygroundEditorTheme';
 import './themes/darkMode.css';
-import ThemeToggle from './ui/ThemeToggle';
 import './ui/sidebars.css';
 import {validateUrl} from './utils/url';
 
@@ -134,7 +133,6 @@ export default function App(): JSX.Element {
           </div>
           <CheckpointsSidebar />
           <ChatSidebar />
-          <ThemeToggle />
         </CompareModeProvider>
       </ToolbarContext>
     </LexicalExtensionComposer>

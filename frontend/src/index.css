@@ -1525,7 +1525,7 @@ button.action-button:disabled {
   min-height: 36px;
   height: 36px;
   position: sticky;
-  top: var(--ge-app-bar-height, 0px);
+  top: var(--app-bar-h, var(--ge-app-bar-height, 0px));
   z-index: 20;
   flex-wrap: nowrap;
 }
