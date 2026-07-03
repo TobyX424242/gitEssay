@@ -1,0 +1,39 @@
+# gitEssay — one-command local stack.
+#
+#   docker compose up --build      # build + launch
+#   docker compose up -d           # detached
+#   docker compose logs -f backend # tail backend logs
+#   docker compose down            # stop (keeps the db volume)
+#   doccer compose down -v         # stop + DELETE the SQLite volume
+#
+# Open the app at http://localhost:5180 (nginx). The backend is internal-only;
+# the frontend proxies /api → http://backend:8000.
+#
+# Your SQLite data (projects/checkpoints/conversations + the server-side AI key)
+# lives in the `gitessay-data` named volume and persists across rebuilds.
+
+services:
+  backend:
+    build: ./backend
+    container_name: gitessay-backend
+    # SQLite lives here (see app/db.py: DB_PATH = $GITESSAY_DB).
+    environment:
+      GITESSAY_DB: /app/data/gitessay.db
+    volumes:
+      #- gitessay-data:/app/data
+      - ./backend/gitessay.db:/app/data/gitessay.db
+    expose:
+      - "8000" # internal only — the frontend proxies to it
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: gitessay-frontend
+    ports:
+      - "5180:80" # http://localhost:5180
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  gitessay-data:

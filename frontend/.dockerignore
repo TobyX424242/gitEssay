@@ -1,0 +1,7 @@
+# Keep the build context small; the build is produced inside the image.
+node_modules
+build
+.git
+.gitignore
+Dockerfile
+.dockerignore

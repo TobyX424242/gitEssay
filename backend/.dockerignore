@@ -1,0 +1,12 @@
+# Keep the build context small and avoid copying the host's runtime state.
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+gitessay.db
+gitessay.db-journal
+.git
+.gitignore
+README.md
+Dockerfile
+.dockerignore
