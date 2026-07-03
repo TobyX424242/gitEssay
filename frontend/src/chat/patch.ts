@@ -48,6 +48,14 @@ const REPLACE_END = /^>{4,}\s*(REPLACE|ENDED)\b/;
 const THINKING_RE = /<thinking>([\s\S]*?)(<\/thinking>|$)/i;
 const ACTION_RE = /<action>([\s\S]*?)<\/action>/i; // CLOSED only — partial stays hidden
 const ACTION_RE_PARTIAL = /<action>([\s\S]*)$/i; // open tail (for stripping)
+// GLOBAL variants for stripMarkup. The regexes above are first-match (non-global)
+// because extractThinking/actionJson PARSE the single intended block via .exec —
+// a module-level regex with the `g` flag would carry stateful lastIndex between
+// calls and is wrong there. But stripMarkup must remove EVERY block: a model
+// occasionally emits a second <thinking>/<action> block, and a non-global replace
+// would strip only the first and leave the second as literal text in the prose.
+const THINKING_RE_ALL = /<thinking>[\s\S]*?(<\/thinking>|$)/gi;
+const ACTION_RE_ALL = /<action>[\s\S]*?<\/action>/gi;
 
 /**
  * Parse model output into {prose, edits}. Tolerant of surrounding code fences.
@@ -119,8 +127,8 @@ export function extractThinking(raw: string): string {
  * too (so streaming JSON / half-finished reasoning isn't shown as prose).
  */
 export function stripMarkup(raw: string): string {
-  let out = raw.replace(THINKING_RE, '');
-  out = out.replace(ACTION_RE, '');
+  let out = raw.replace(THINKING_RE_ALL, '');
+  out = out.replace(ACTION_RE_ALL, '');
   out = out.replace(ACTION_RE_PARTIAL, '');
   return out.trim();
 }

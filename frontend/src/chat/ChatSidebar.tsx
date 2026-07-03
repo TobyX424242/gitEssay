@@ -104,6 +104,12 @@ export default function ChatSidebar(): JSX.Element {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const trapRef = useScrollTrap();
   const abortRef = useRef<AbortController | null>(null);
+  // Re-entrancy guard for the accept/revert paths. Applying edits + persisting
+  // per-edit state is async, and the conversations store is NOT optimistic (each
+  // write awaits HTTP then refetches), so retry() reading a snapshot mid-accept
+  // would see stale 'pending' edits and skip the revert. Block retry (and a
+  // second accept) while one is in flight.
+  const acceptingRef = useRef(false);
 
   // Ensure at least one conversation exists for the active project.
   useEffect(() => {
@@ -297,7 +303,7 @@ export default function ChatSidebar(): JSX.Element {
 
   const retry = useCallback(
     async (assistantId: string) => {
-      if (!active || loading) {
+      if (!active || loading || acceptingRef.current) {
         return;
       }
       const convId = active.id;
@@ -324,29 +330,50 @@ export default function ChatSidebar(): JSX.Element {
       if (applied.length > 0) {
         const explanation =
           target.action?.kind === 'patch' ? target.action.explanation : 'AI edit';
-        // Undo last-applied first (safer ordering, like an undo stack).
+        // Undo last-applied first (safer ordering, like an undo stack). Track
+        // failures: a revert can't locate the text if the user edited it since, or
+        // if an earlier revert in this same loop shifted the region.
         let undone = 0;
-        for (const {e, i} of [...applied].reverse()) {
-          const res = await applyTextPatch(editor, e.replace, e.search); // reverse swap
-          if (res.ok) {
-            undone++;
-            void setEditState(convId, assistantId, i, 'reverted');
+        let failed = 0;
+        acceptingRef.current = true;
+        try {
+          for (const {e, i} of [...applied].reverse()) {
+            const res = await applyTextPatch(editor, e.replace, e.search); // reverse swap
+            if (res.ok) {
+              undone++;
+              await setEditState(convId, assistantId, i, 'reverted');
+            } else {
+              failed++;
+            }
           }
+          if (undone > 0) {
+            await captureCheckpoint(editor, {
+              source: 'manual',
+              label: `Reverted before retry: ${truncate(explanation, 80)}`,
+            });
+          }
+        } finally {
+          acceptingRef.current = false;
         }
-        if (undone > 0) {
-          await captureCheckpoint(editor, {
-            source: 'manual',
-            label: `Reverted before retry: ${truncate(explanation, 80)}`,
-          });
+        if (failed === 0) {
           setNotice({
             text: `↩ Reverted ${undone} accepted edit${
               undone === 1 ? '' : 's'
             } from the previous response so the new attempt can apply cleanly. The accepted version is still in History.`,
             key: Date.now(),
           });
+        } else if (undone > 0) {
+          // Partial revert: some edits couldn't be located, so the document still
+          // contains them. Report it honestly rather than claiming a clean slate.
+          setNotice({
+            text: `↩ Reverted ${undone} of ${applied.length} edit${
+              applied.length === 1 ? '' : 's'
+            }; ${failed} couldn't be located (the document changed). Retrying anyway — the new patch may not apply to those parts.`,
+            key: Date.now(),
+          });
         } else {
           setNotice({
-            text: "Couldn't auto-revert the previous edit (the document has changed since). Retrying anyway — the new patch may not apply.",
+            text: "Couldn't auto-revert the previous edit(s) (the document has changed since). Retrying anyway — the new patch may not apply.",
             key: Date.now(),
           });
         }
@@ -378,33 +405,42 @@ export default function ChatSidebar(): JSX.Element {
   const acceptPatch = useCallback(
     async (msgId_: string) => {
       const convId = active?.id;
-      if (!convId) {
+      if (!convId || acceptingRef.current) {
         return;
       }
       const msg = active.messages.find(m => m.id === msgId_);
       if (!msg || msg.action?.kind !== 'patch') {
         return;
       }
-      const label = msg.action.explanation;
-      const edits = msg.edits ?? [];
-      let appliedAny = false;
-      for (let i = 0; i < edits.length; i++) {
-        if (edits[i].state !== 'pending') {
-          continue; // skip edits the user already rejected/resolved
+      acceptingRef.current = true;
+      try {
+        const label = msg.action.explanation;
+        const edits = msg.edits ?? [];
+        let appliedAny = false;
+        for (let i = 0; i < edits.length; i++) {
+          if (edits[i].state !== 'pending') {
+            continue; // skip edits the user already rejected/resolved
+          }
+          const res = await applyTextPatch(editor, edits[i].search, edits[i].replace);
+          if (res.ok) {
+            appliedAny = true;
+            // Await so the per-edit state is durable before releasing the guard:
+            // retry() reads edit state from the (non-optimistic) store, and a
+            // fire-and-forget write here lets a fast Retry see a stale 'pending'
+            // snapshot and skip the revert.
+            await setEditState(convId, msgId_, i, 'applied');
+          } else {
+            await setEditState(convId, msgId_, i, 'unlocatable');
+          }
         }
-        const res = await applyTextPatch(editor, edits[i].search, edits[i].replace);
-        if (res.ok) {
-          appliedAny = true;
-          void setEditState(convId, msgId_, i, 'applied');
-        } else {
-          void setEditState(convId, msgId_, i, 'unlocatable');
+        if (appliedAny) {
+          await captureCheckpoint(editor, {
+            source: 'ai-accept',
+            label: truncate(label, 120) || 'AI chat edit',
+          });
         }
-      }
-      if (appliedAny) {
-        await captureCheckpoint(editor, {
-          source: 'ai-accept',
-          label: truncate(label, 120) || 'AI chat edit',
-        });
+      } finally {
+        acceptingRef.current = false;
       }
     },
     [active, editor],
@@ -839,18 +875,17 @@ function MessageBubble({
         </div>
       ))}
 
+      {message.text && (
+        <div className="chat-bubble chat-bubble--assistant">
+          <Markdown>{message.text}</Markdown>
+        </div>
+      )}
       {message.error ? (
         <div className="chat-bubble chat-bubble--assistant chat-error">
           ⚠ {message.error}
         </div>
       ) : (
         <>
-          {message.text && (
-            <div className="chat-bubble chat-bubble--assistant">
-              <Markdown>{message.text}</Markdown>
-            </div>
-          )}
-
           {patchLabel && edits.length > 0 && (
             <div className="chat-edit-explanation">✎ {patchLabel}</div>
           )}
@@ -988,7 +1023,7 @@ function MessageBubble({
         </>
       )}
 
-      {!live && !message.error && (
+      {!live && (
         <div className="chat-msg-actions">
           <button
             type="button"
