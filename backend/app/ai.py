@@ -4,7 +4,16 @@ Server-side port of the frontend's src/rewrite/llmClient.ts. Because these calls
 run from the backend (not the browser) there's no CORS concern and no
 `anthropic-dangerous-direct-browser-access` header needed; the API key lives
 server-side (AISettings), never in the browser.
+
+Two surfaces:
+  - call_model(...)         — blocking, returns the full text (used by /ai/test).
+  - stream_model(...)       — async generator yielding normalized streaming
+                              events (used by /chat/stream). Both providers are
+                              normalized to {type: thinking|text|done|error}.
 """
+import json
+from typing import AsyncIterator
+
 import httpx
 
 
@@ -108,3 +117,131 @@ def _anthropic(s, system: str, user: str) -> str:
             f"model returned no text (stop_reason: {data.get('stop_reason', 'unknown')})"
         )
     return content
+
+
+# --- streaming -------------------------------------------------------------
+# Normalized events:
+#   {"type": "thinking", "delta": "..."}  — reasoning text (reasoning_content /
+#                                           Anthropic thinking_delta); shown live
+#                                           in a collapsible "Thoughts" pane.
+#   {"type": "text",     "delta": "..."}  — visible content (prose + actions).
+#   {"type": "done"}                       — stream complete.
+#   {"type": "error",    "message": "..."} — fatal; client should surface it.
+def _ev(kind: str, **extra) -> dict:
+    return {"type": kind, **extra}
+
+
+async def stream_model(s, system: str, messages: list) -> AsyncIterator[dict]:
+    """Async generator yielding normalized streaming events for one chat turn.
+
+    `messages` is an OpenAI-style [{role, content}] array (user/assistant only —
+    tool results are framed as user turns by the frontend so the same shape works
+    for both provider formats). The system prompt is passed separately.
+    """
+    if s.provider_format == "anthropic":
+        async for ev in _anthropic_stream(s, system, messages):
+            yield ev
+    else:
+        async for ev in _openai_stream(s, system, messages):
+            yield ev
+
+
+async def _openai_stream(s, system: str, messages: list) -> AsyncIterator[dict]:
+    body = {
+        "model": s.model,
+        "messages": [{"role": "system", "content": system}, *messages],
+        "temperature": s.temperature,
+        "max_tokens": s.max_output_tokens,
+        "stream": True,
+    }
+    # timeout=None: streaming first-byte / inter-chunk gaps can exceed the
+    # default pool timeout, especially on slow reasoning models.
+    try:
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream(
+                "POST",
+                endpoint(s),
+                json=body,
+                headers={"Authorization": f"Bearer {s.api_key}"},
+            ) as r:
+                if r.status_code >= 400:
+                    raw = (await r.aread()).decode("utf-8", "replace")
+                    yield _ev("error", message=f"HTTP {r.status_code}: {raw[:500]}")
+                    return
+                async for line in r.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload = line[len("data:") :].strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = obj.get("choices") or []
+                    delta = (choices[0].get("delta") if choices else {}) or {}
+                    # Reasoning models (o-series, some gateways) expose reasoning
+                    # via `reasoning_content`; surface it as thinking.
+                    reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                    if reasoning:
+                        yield _ev("thinking", delta=reasoning)
+                    if delta.get("content"):
+                        yield _ev("text", delta=delta["content"])
+    except httpx.HTTPError as e:
+        yield _ev("error", message=f"network error: {e}")
+        return
+    yield _ev("done")
+
+
+async def _anthropic_stream(s, system: str, messages: list) -> AsyncIterator[dict]:
+    body = {
+        "model": s.model,
+        "system": system,
+        "messages": messages,
+        "temperature": s.temperature,
+        "max_tokens": s.max_output_tokens,
+        "stream": True,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream(
+                "POST",
+                endpoint(s),
+                json=body,
+                headers={
+                    "x-api-key": s.api_key,
+                    "anthropic-version": "2023-06-01",
+                },
+            ) as r:
+                if r.status_code >= 400:
+                    raw = (await r.aread()).decode("utf-8", "replace")
+                    yield _ev("error", message=f"HTTP {r.status_code}: {raw[:500]}")
+                    return
+                # Anthropic SSE: `event: <name>` then `data: {json}`. We only
+                # need the data lines; each carries its own `type`.
+                async for line in r.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload = line[len("data:") :].strip()
+                    try:
+                        obj = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    etype = obj.get("type")
+                    if etype == "content_block_delta":
+                        delta = obj.get("delta") or {}
+                        dtype = delta.get("type")
+                        if dtype == "text_delta" and delta.get("text"):
+                            yield _ev("text", delta=delta["text"])
+                        elif dtype == "thinking_delta" and delta.get("thinking"):
+                            yield _ev("thinking", delta=delta["thinking"])
+                    elif etype == "message_stop":
+                        break
+                    elif etype == "error":
+                        err = (obj.get("error") or {}).get("message", "anthropic error")
+                        yield _ev("error", message=err)
+                        return
+    except httpx.HTTPError as e:
+        yield _ev("error", message=f"network error: {e}")
+        return
+    yield _ev("done")

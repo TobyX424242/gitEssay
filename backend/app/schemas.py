@@ -86,6 +86,20 @@ class EditStatePatch(BaseModel):
     state: str
 
 
+# ---- memories (AI long-term, project-scoped notes) ------------------------
+class MemoryOut(BaseModel):
+    id: str
+    project_id: str
+    content: str
+    created_at: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MemoryCreate(BaseModel):
+    content: str
+
+
 # ---- AI -------------------------------------------------------------------
 class ChatRequest(BaseModel):
     system: str
@@ -94,6 +108,14 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     content: str
+
+
+class ChatStreamRequest(BaseModel):
+    """Multi-turn streaming chat. `messages` is an OpenAI-style
+    [{role: 'user'|'assistant', content: str}] array — tool results are framed
+    as user turns by the frontend, so the same shape serves both providers."""
+    system: str
+    messages: list[dict[str, Any]]
 
 
 class AISettingsOut(BaseModel):

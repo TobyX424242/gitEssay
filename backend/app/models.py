@@ -83,6 +83,20 @@ class Conversation(Base):
     updated_at = Column(Integer, nullable=False, default=now_ms, index=True)
 
 
+class Memory(Base):
+    """AI's long-term, project-scoped notes — things it wants to remember about
+    this project across conversations. Injected into the agent's context when the
+    user has long-term memory enabled; the agent can add notes via the `remember`
+    action."""
+    __tablename__ = "memories"
+    id = Column(String, primary_key=True)
+    project_id = Column(
+        String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    content = Column(Text, nullable=False)
+    created_at = Column(Integer, nullable=False, default=now_ms, index=True)
+
+
 class AISettings(Base):
     __tablename__ = "ai_settings"
     id = Column(Integer, primary_key=True)  # always 1 (single-row, single-user)

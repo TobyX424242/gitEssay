@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db import Base, SessionLocal, engine
 from app.models import EMPTY_STATE, AISettings, Checkpoint, Project, new_id, now_ms
 from app.routers import ai as ai_router
-from app.routers import checkpoints, conversations, projects
+from app.routers import checkpoints, conversations, memories, projects
 
 
 def _seed() -> None:
@@ -64,6 +64,7 @@ app.add_middleware(
 app.include_router(projects.router, prefix="/api")
 app.include_router(checkpoints.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
+app.include_router(memories.router, prefix="/api")
 app.include_router(ai_router.router, prefix="/api")
 
 

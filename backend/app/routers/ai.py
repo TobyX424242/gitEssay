@@ -1,5 +1,8 @@
 """gitEssay backend — AI router: settings, chat gateway, test, agent stub."""
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app import ai, schemas
@@ -79,6 +82,33 @@ def chat(body: schemas.ChatRequest, db: Session = Depends(get_db)):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(e))
     return {"content": content}
+
+
+@router.post("/chat/stream")
+async def chat_stream(body: schemas.ChatStreamRequest, db: Session = Depends(get_db)):
+    """SSE stream of normalized events ({type: thinking|text|done|error}).
+
+    The frontend agent loop calls this once per internal turn; read/search tool
+    results are fed back as subsequent user turns in `messages`."""
+    s = _settings(db)
+    if not (s.base_url and s.api_key and s.model):
+        raise HTTPException(
+            status_code=400,
+            detail="AI is not configured (set provider/key/model in settings)",
+        )
+
+    async def gen():
+        try:
+            async for ev in ai.stream_model(s, body.system, body.messages):
+                yield f"data: {json.dumps(ev)}\n\n"
+        except Exception as e:  # noqa: BLE001 — never let the generator die silently
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/agent/run")
