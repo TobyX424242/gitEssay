@@ -8,14 +8,15 @@
  */
 export type ChatMode = 'selection' | 'document';
 
-export interface ChatContext {
+/**
+ * Context captured at send time and stored on the user message (drives Retry).
+ * The full document text is read fresh by the agent (runAgent) — only the edit
+ * target (a selection, if any) is captured here.
+ */
+export interface MessageContext {
   mode: ChatMode;
   /** Plain text of the selection (mode 'selection'). */
   selectionText?: string;
-  /** Full document text, blocks joined by blank lines (mode 'document'). */
-  documentText: string;
-  /** The user's instruction / message. */
-  instruction: string;
 }
 
 export interface ChatEdit {
@@ -26,7 +27,12 @@ export interface ChatEdit {
 }
 
 /** Lifecycle of a proposed edit in the UI. */
-export type ChatEditState = 'pending' | 'applied' | 'rejected' | 'unlocatable';
+export type ChatEditState =
+  | 'pending'
+  | 'applied'
+  | 'rejected'
+  | 'unlocatable'
+  | 'reverted';
 
 export interface ChatResponse {
   /** Assistant prose shown to the user (may be empty). */
@@ -35,10 +41,35 @@ export interface ChatResponse {
   edits: ChatEdit[];
 }
 
-export interface ChatProvider {
-  id: string;
-  label: string;
-  chat(ctx: ChatContext): Promise<ChatResponse>;
+/**
+ * The terminal action of an assistant turn (the agent's "what to do"). Exactly
+ * one per turn (or null for a pure-advice reply). Drives the action card UI and
+ * the agent loop's stop/continue decision.
+ *
+ * For `patch`, the edits themselves live on `ChatMessage.edits` (with per-edit
+ * accept/reject state) so the existing edit-state persistence keeps working;
+ * the action carries only the commit-style `explanation`.
+ */
+export type AssistantAction =
+  | {kind: 'patch'; explanation: string}
+  | {kind: 'ask'; question: string; options: string[]}
+  | {kind: 'finish'; summary?: string};
+
+/**
+ * A non-terminal agent step — the AI inspected the document (read all of it, or
+ * searched for a term) or saved a long-term memory note. Shown as a chip in the
+ * message. These do NOT stop the loop; only an AssistantAction (or no action)
+ * does.
+ */
+export interface AgentStep {
+  kind: 'read' | 'search' | 'remember';
+  /** search query, or undefined for a full read */
+  query?: string;
+  /** remember: the note the AI saved. */
+  note?: string;
+  /** read/search: how many characters/snippets came back (for the chip label). */
+  hits?: number;
+  at: number;
 }
 
 /** A single rendered conversation turn (UI state). */
@@ -48,11 +79,20 @@ export interface ChatMessage {
   /** For 'user': the instruction; for 'assistant': prose (may be empty). */
   text: string;
   /** User only: the exact request context captured at send time (drives Retry). */
-  context?: ChatContext;
+  context?: MessageContext;
   /** Assistant only: context mode captured when the turn was sent. */
   mode?: ChatMode;
-  /** Assistant only: proposed edits, each with its own accept/reject state. */
+  /** Assistant only: reasoning text shown in the collapsible Thoughts pane. */
+  thinking?: string;
+  /** Assistant only: non-terminal document-inspection steps (read/search). */
+  steps?: AgentStep[];
+  /** Assistant only: the terminal action (patch / ask / finish), else advice. */
+  action?: AssistantAction | null;
+  /** Assistant only: proposed edits (LEGACY — superseded by action.patch; kept
+   *  so previously-persisted messages still render their diff cards). */
   edits?: Array<ChatEdit & {state: ChatEditState}>;
   /** Assistant only: error message if the call failed. */
   error?: string;
+  /** Assistant only: true while this turn is still streaming (UI hint). */
+  streaming?: boolean;
 }

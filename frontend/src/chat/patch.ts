@@ -1,19 +1,27 @@
 /**
  * gitEssay — coding-agent-style patch parsing + application.
  *
- * The AI proposes edits as SEARCH/REPLACE blocks (Aider/Cline convention):
+ * Two output protocols coexist:
  *
- *   <<<<<<< SEARCH
- *   <verbatim passage from the document, within a single block>
- *   =======
- *   <replacement text>
- *   >>>>>>> REPLACE
+ *  (A) SEARCH/REPLACE blocks (legacy, Aider/Cline convention):
+ *        <<<<<<< SEARCH
+ *        <verbatim passage from the document, within a single block>
+ *        =======
+ *        <replacement text>
+ *        >>>>>>> REPLACE
+ *      parsePatches() splits legacy output into prose + edits.
  *
- * parsePatches splits the model output into prose + edits. applyTextPatch locates
- * the SEARCH text verbatim within a single top-level block and splices the
- * replacement into the covering TextNodes (the replacement inherits the first
- * node's formatting). A SEARCH is constrained to one block so locating it is
- * unambiguous; multi-block changes use multiple blocks.
+ *  (B) The streaming agent's <thinking>/<action> protocol (current):
+ *        <thinking>…step-by-step reasoning…</thinking>
+ *        <action>{ "kind": "patch|ask|finish|read|search", … }</action>
+ *      parseTurn() splits a finished turn into {thinking, prose, action};
+ *      extractPartialAction() / stripMarkup() / extractThinking() power the
+ *      LIVE streaming view (partial-aware, so raw markup never shows in prose).
+ *
+ * applyTextPatch locates the SEARCH text verbatim within a single top-level
+ * block and splices the replacement into the covering TextNodes (the replacement
+ * inherits the first node's formatting). A SEARCH is constrained to one block so
+ * locating it is unambiguous; multi-block changes use multiple blocks.
  */
 import {
   $getNodeByKey,
@@ -27,11 +35,19 @@ import {
 } from 'lexical';
 
 import type {DiffBlock} from '../diff/types';
-import type {ChatEdit} from './types';
+import type {AssistantAction, ChatEdit} from './types';
 
 const SEARCH_START = /<{4,}\s*SEARCH\b/;
 const DIVIDER = /^={4,}\s*$/;
 const REPLACE_END = /^>{4,}\s*(REPLACE|ENDED)\b/;
+
+// --- agent protocol markup -------------------------------------------------
+// Partial-aware: an unclosed block matches to end-of-string ($), so a streaming
+// <thinking>… or <action>… tail is stripped from the live prose view before the
+// closing tag arrives.
+const THINKING_RE = /<thinking>([\s\S]*?)(<\/thinking>|$)/i;
+const ACTION_RE = /<action>([\s\S]*?)<\/action>/i; // CLOSED only — partial stays hidden
+const ACTION_RE_PARTIAL = /<action>([\s\S]*)$/i; // open tail (for stripping)
 
 /**
  * Parse model output into {prose, edits}. Tolerant of surrounding code fences.
@@ -88,6 +104,160 @@ export function parsePatches(raw: string): {prose: string; edits: ChatEdit[]} {
 
   const prose = proseParts.join('\n').trim();
   return {prose, edits};
+}
+
+// --- streaming agent protocol ---------------------------------------------
+/** Tagged <thinking> content (complete OR partial-to-end) — for the live pane. */
+export function extractThinking(raw: string): string {
+  const m = THINKING_RE.exec(raw);
+  return m ? m[1].trim() : '';
+}
+
+/**
+ * Strip <thinking> and <action> markup so it never leaks into the prose bubble.
+ * Complete blocks are removed; an unclosed <thinking>/<action> tail is removed
+ * too (so streaming JSON / half-finished reasoning isn't shown as prose).
+ */
+export function stripMarkup(raw: string): string {
+  let out = raw.replace(THINKING_RE, '');
+  out = out.replace(ACTION_RE, '');
+  out = out.replace(ACTION_RE_PARTIAL, '');
+  return out.trim();
+}
+
+function asEdits(value: unknown): ChatEdit[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map(e => (e && typeof e === 'object' ? e : null))
+    .filter((e): e is Record<string, unknown> => !!e)
+    .map(e => ({
+      search: typeof e.search === 'string' ? e.search : '',
+      replace: typeof e.replace === 'string' ? e.replace : '',
+    }))
+    .filter(e => e.search.trim().length > 0);
+}
+
+function asStrings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map(v => (typeof v === 'string' ? v : String(v ?? ''))).filter(s => s.length > 0)
+    : [];
+}
+
+/** The cleaned JSON body of a CLOSED <action>…</action> block, or null. */
+function actionJson(raw: string): string | null {
+  const m = ACTION_RE.exec(raw);
+  if (!m) {
+    return null;
+  }
+  return m[1]
+    .replace(/^\s*```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/, '')
+    .trim();
+}
+
+function parseJsonObject(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Parse a closed <action>{json}</action> body into an AssistantAction, or null. */
+function parseAction(jsonBody: string): AssistantAction | null {
+  const obj = parseJsonObject(jsonBody);
+  if (!obj) {
+    return null;
+  }
+  switch (obj.kind) {
+    case 'patch':
+      // Edits live on ChatMessage.edits (with per-edit state); the action only
+      // carries the commit-style explanation. runAgent pulls edits via actionEdits().
+      return {
+        kind: 'patch',
+        explanation:
+          typeof obj.explanation === 'string' && obj.explanation.trim()
+            ? obj.explanation.trim()
+            : 'AI edit',
+      };
+    case 'ask':
+      return {
+        kind: 'ask',
+        question: typeof obj.question === 'string' ? obj.question.trim() : '',
+        options: asStrings(obj.options),
+      };
+    case 'finish':
+      return {
+        kind: 'finish',
+        summary: typeof obj.summary === 'string' ? obj.summary.trim() : undefined,
+      };
+    default:
+      return null;
+  }
+}
+
+/** Edits declared inside a patch action body (used to populate message.edits). */
+export function actionEdits(raw: string): ChatEdit[] {
+  const body = actionJson(raw);
+  if (!body) {
+    return [];
+  }
+  const obj = parseJsonObject(body);
+  return obj ? asEdits(obj.edits) : [];
+}
+
+/** A read/search tool action (non-terminal — drives the loop). */
+export interface ToolAction {
+  kind: 'read' | 'search';
+  query?: string;
+}
+
+export function extractToolAction(raw: string): ToolAction | null {
+  const body = actionJson(raw);
+  const obj = body ? parseJsonObject(body) : null;
+  if (!obj) {
+    return null;
+  }
+  if (obj.kind === 'read') {
+    return {kind: 'read', query: typeof obj.query === 'string' ? obj.query : undefined};
+  }
+  if (obj.kind === 'search') {
+    return {kind: 'search', query: typeof obj.query === 'string' ? obj.query : ''};
+  }
+  return null;
+}
+
+/** A `remember` action (non-terminal — saves a long-term memory note, then continues). */
+export function extractRememberAction(raw: string): {note: string} | null {
+  const body = actionJson(raw);
+  const obj = body ? parseJsonObject(body) : null;
+  if (!obj || obj.kind !== 'remember') {
+    return null;
+  }
+  const note = typeof obj.note === 'string' ? obj.note.trim() : '';
+  return note ? {note} : null;
+}
+
+/** A terminal action ONLY once its </action> closing tag has arrived. */
+export function extractPartialAction(raw: string): AssistantAction | null {
+  const body = actionJson(raw);
+  return body ? parseAction(body) : null;
+}
+
+/** Split a finished turn. `action` is null for a pure-advice (prose) reply. */
+export function parseTurn(raw: string): {
+  thinking: string;
+  prose: string;
+  action: AssistantAction | null;
+} {
+  return {
+    thinking: extractThinking(raw),
+    prose: stripMarkup(raw),
+    action: extractPartialAction(raw),
+  };
 }
 
 /** Plain text → paragraph DiffBlocks (the "new" side of an edit-card diff). */

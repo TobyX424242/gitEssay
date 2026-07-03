@@ -3,7 +3,7 @@
 
 .chat-dock {
   position: fixed;
-  top: 0;
+  top: var(--app-bar-h, var(--ge-app-bar-height));
   right: 0;
   bottom: 0;
   width: var(--ge-chat-width, 400px);
@@ -180,6 +180,11 @@
 .chat-edit-status--err {
   color: #c0392b;
 }
+/* Inline "Undo reject" — sits where the status would, restores a pruned edit. */
+.chat-edit-undo {
+  font-size: 12px;
+  padding: 3px 8px;
+}
 [data-theme='dark'] .chat-edit-status--ok {
   color: #9fe6b8;
 }
@@ -250,7 +255,9 @@
 .chat-composer {
   display: flex;
   gap: 8px;
-  align-items: flex-end;
+  /* stretch so the Send/Stop button matches the textarea's full height (both
+     edges align) instead of bottom-aligning a short button. */
+  align-items: stretch;
   padding: 10px 12px;
   border-top: 1px solid var(--ge-border);
   background: var(--ge-surface-2);
@@ -417,4 +424,569 @@
 .chat-retry:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ---- streaming agent UI ---- */
+
+/* Transient notice banner (e.g. "reverted N edits before retry"). */
+.chat-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--ge-accent);
+  background: color-mix(in srgb, var(--ge-accent) 12%, var(--ge-surface));
+  color: var(--ge-text);
+  font-size: 12px;
+  line-height: 1.45;
+  animation: chat-notice-in 0.18s ease;
+}
+@keyframes chat-notice-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.chat-notice-close {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ge-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 0 2px;
+  border-radius: 4px;
+}
+.chat-notice-close:hover {
+  color: var(--ge-text);
+}
+
+/* A live (still-streaming) assistant message gets a faint left accent rail. */
+.chat-msg--assistant.is-live {
+  position: relative;
+  padding-left: 10px;
+}
+.chat-msg--assistant.is-live::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--ge-accent);
+  opacity: 0.7;
+  animation: chat-rail 1.4s infinite ease-in-out;
+}
+@keyframes chat-rail {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.85; }
+}
+
+/* Collapsible Thoughts pane (expanded while streaming, collapsed when done). */
+.chat-thinking-pane {
+  margin-bottom: 6px;
+  border: 1px solid var(--ge-border);
+  border-radius: 8px;
+  background: var(--ge-surface);
+  overflow: hidden;
+}
+.chat-thinking-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  background: var(--ge-surface-2);
+  color: var(--ge-text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 6px 10px;
+  cursor: pointer;
+  text-align: left;
+}
+.chat-thinking-toggle:hover {
+  color: var(--ge-text);
+}
+.chat-thinking-chev {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  font-size: 10px;
+}
+.chat-thinking-pane.is-open .chat-thinking-chevron,
+.chat-thinking-pane.is-open .chat-thinking-chev {
+  transform: rotate(90deg);
+}
+.chat-thinking-pane.is-live .chat-thinking-label {
+  color: var(--ge-accent);
+}
+.chat-thinking-body {
+  padding: 8px 10px;
+  font-family: var(--ge-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ge-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-top: 1px solid var(--ge-border);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+/* Agent read/search step chips. */
+.chat-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  font-size: 11px;
+  color: var(--ge-text-muted);
+  background: var(--ge-surface-2);
+  border: 1px solid var(--ge-border);
+  border-radius: 10px;
+  padding: 2px 8px;
+  margin-bottom: 4px;
+}
+.chat-step-icon {
+  font-size: 11px;
+}
+.chat-step-hits {
+  opacity: 0.8;
+}
+
+/* Commit-style explanation line above a patch's diff cards. */
+.chat-edit-explanation {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ge-accent);
+  font-weight: 600;
+}
+
+/* Action-level Accept footer: one button applies the whole justification and
+   captures a single checkpoint. */
+.chat-edit-action-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* ask action card */
+.chat-action {
+  margin-top: 8px;
+}
+.chat-action-ask {
+  border: 1px solid var(--ge-border);
+  border-radius: 8px;
+  background: var(--ge-surface);
+  padding: 10px;
+}
+.chat-ask-question {
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+.chat-ask-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.chat-ask-option {
+  text-align: left;
+  width: 100%;
+}
+.chat-ask-freeform {
+  display: flex;
+  gap: 6px;
+  border-top: 1px solid var(--ge-border);
+  padding-top: 8px;
+}
+.chat-ask-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--ge-border);
+  background: var(--ge-surface-2);
+  color: var(--ge-text);
+}
+.chat-ask-input:focus {
+  outline: none;
+  border-color: var(--ge-accent);
+}
+.chat-ask-send {
+  flex-shrink: 0;
+}
+
+/* finish action */
+.chat-finish {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ge-text-muted);
+  background: var(--ge-surface-2);
+  border: 1px solid var(--ge-border);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+/* Stop button in the composer (replaces Send while streaming). */
+.chat-stop {
+  background: var(--ge-surface-2);
+  color: var(--ge-text);
+  border: 1px solid var(--ge-border);
+}
+.chat-stop:hover {
+  border-color: rgba(230, 96, 96, 0.6);
+  color: #c0392b;
+}
+
+/* ---- AI long-term memory (header button + modal panel) ---- */
+
+/* Labeled "Memory" button in the AI header — a clear text button (not an icon),
+   with a status dot: filled accent = on, muted = off. */
+.chat-mem-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--ge-border);
+  background: var(--ge-surface);
+  color: var(--ge-text-muted);
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.chat-mem-btn:hover {
+  background: var(--ge-surface-2);
+  color: var(--ge-text);
+}
+.chat-mem-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--ge-text-muted);
+  flex-shrink: 0;
+}
+.chat-mem-btn.is-on {
+  color: var(--ge-accent);
+  border-color: color-mix(in srgb, var(--ge-accent) 40%, var(--ge-border));
+  background: color-mix(in srgb, var(--ge-accent) 12%, var(--ge-surface));
+}
+.chat-mem-btn.is-on .chat-mem-dot {
+  background: var(--ge-accent);
+  border-color: var(--ge-accent);
+}
+
+.mem-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 320;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.mem-panel {
+  width: min(520px, 96vw);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--ge-surface);
+  color: var(--ge-text);
+  border: 1px solid var(--ge-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+.mem-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--ge-border);
+  background: var(--ge-surface-2);
+}
+.mem-title {
+  font-weight: 700;
+  font-size: 14px;
+}
+.mem-close {
+  border: 0;
+  background: transparent;
+  color: var(--ge-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.mem-close:hover {
+  background: var(--ge-surface);
+  color: var(--ge-text);
+}
+
+/* enable/disable toggle */
+.mem-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--ge-border);
+}
+.mem-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.mem-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.mem-switch-track {
+  position: absolute;
+  inset: 0;
+  background: var(--ge-border);
+  border-radius: 20px;
+  transition: background 0.15s;
+}
+.mem-switch-track::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.mem-switch input:checked + .mem-switch-track {
+  background: var(--ge-accent);
+}
+.mem-switch input:checked + .mem-switch-track::before {
+  transform: translateX(16px);
+}
+.mem-toggle-text {
+  flex: 1;
+  min-width: 0;
+}
+.mem-toggle-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.mem-toggle-hint {
+  font-size: 12px;
+  color: var(--ge-text-muted);
+  line-height: 1.45;
+  margin-top: 2px;
+}
+
+/* notes list */
+.mem-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mem-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--ge-text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.mem-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--ge-border);
+  border-radius: 8px;
+  background: var(--ge-surface-2);
+}
+.mem-item-body {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mem-item-del {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ge-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  opacity: 0.6;
+}
+.mem-item-del:hover {
+  background: rgba(230, 96, 96, 0.18);
+  color: #c0392b;
+  opacity: 1;
+}
+
+/* add-a-note box */
+.mem-add {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--ge-border);
+  background: var(--ge-surface-2);
+}
+.mem-add-input {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  border: 1px solid var(--ge-border);
+  border-radius: 8px;
+  background: var(--ge-surface);
+  color: var(--ge-text);
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.5;
+  padding: 8px 10px;
+}
+.mem-add-input:focus {
+  outline: 2px solid var(--ge-accent);
+  outline-offset: -1px;
+}
+.mem-add-btn {
+  align-self: flex-start;
+}
+
+/* ---- Markdown rendering inside AI bubbles ----
+   The bubble base uses white-space:pre-wrap (good for plain user text); for
+   rendered markdown we let block elements flow instead. Scoped to .md so the
+   same styles cover the assistant prose bubble and the ask-question. */
+.chat-bubble--assistant {
+  white-space: normal;
+}
+.md {
+  font-size: 13px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0 0 8px;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  margin: 12px 0 6px;
+  line-height: 1.3;
+  font-weight: 600;
+}
+.md h1 {
+  font-size: 1.25em;
+}
+.md h2 {
+  font-size: 1.15em;
+}
+.md h3 {
+  font-size: 1.05em;
+}
+.md h4,
+.md h5,
+.md h6 {
+  font-size: 1em;
+}
+.md ul,
+.md ol {
+  margin: 0 0 8px;
+  padding-left: 22px;
+}
+.md li {
+  margin: 2px 0;
+}
+.md li > p {
+  margin: 0;
+}
+.md a {
+  color: var(--ge-accent);
+  text-decoration: underline;
+}
+.md strong {
+  font-weight: 700;
+}
+.md em {
+  font-style: italic;
+}
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--ge-border);
+  margin: 10px 0;
+}
+.md blockquote {
+  margin: 0 0 8px;
+  padding: 2px 12px;
+  border-left: 3px solid var(--ge-border);
+  color: var(--ge-text-muted);
+}
+.md code {
+  font-family: var(--ge-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.88em;
+  background: var(--ge-surface);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.md pre {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  background: var(--ge-surface);
+  border: 1px solid var(--ge-border);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.md pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.88em;
+}
+.md table {
+  border-collapse: collapse;
+  margin: 0 0 8px;
+  font-size: 0.95em;
+  display: block;
+  overflow-x: auto; /* the chat dock is narrow — let wide tables scroll */
+}
+.md th,
+.md td {
+  border: 1px solid var(--ge-border);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.md th {
+  background: var(--ge-surface);
+  font-weight: 600;
+}
+/* GFM task-list checkboxes */
+.md input[type='checkbox'] {
+  margin-right: 6px;
 }
