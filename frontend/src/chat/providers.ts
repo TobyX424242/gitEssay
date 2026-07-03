@@ -242,6 +242,16 @@ export async function runAgent(opts: RunAgentOpts): Promise<ChatMessage> {
   // whatever was streamed (rather than the previous turn's content).
   let curRaw = '';
   let curNativeThink = '';
+  // Read de-duplication. Within one run the document is STATIC — only a terminal
+  // patch mutates it, and a patch ends the loop — so a repeat read/search returns
+  // the SAME text that's already earlier in `messages`. Re-injecting up to
+  // READ_CHAR_CAP each time (the full doc is often already in the initial message)
+  // can blow the model's context window across MAX_TURNS. Track what's been
+  // injected and, on a repeat, return a short back-reference instead of the bytes.
+  // `fullDocInjected` starts true in document mode (buildInitialUserMessage embeds
+  // the whole doc); false in selection mode (only the selection is sent).
+  let fullDocInjected = opts.mode === 'document';
+  const queryCache = new Map<string, {hits: number}>();
 
   try {
     for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -284,14 +294,24 @@ export async function runAgent(opts: RunAgentOpts): Promise<ChatMessage> {
       const remember =
         opts.memoryEnabled && opts.onRemember ? extractRememberAction(text) : null;
       if (remember && lastAction === null) {
-        await opts.onRemember(remember.note);
+        // A failed save (transient backend error) must NOT abort the whole turn —
+        // the user would lose everything already streamed. Isolate it and tell the
+        // model the note wasn't stored so it doesn't act as though it persisted.
+        let saved = true;
+        try {
+          await opts.onRemember(remember.note);
+        } catch {
+          saved = false;
+        }
         steps.push({kind: 'remember', note: remember.note, at: stepCounter++});
         opts.onUpdate({steps: [...steps]});
 
         messages.push({role: 'assistant', content: text});
         messages.push({
           role: 'user',
-          content: `<result>\nSaved to long-term memory: "${remember.note}"\n</result>`,
+          content: saved
+            ? `<result>\nSaved to long-term memory: "${remember.note}"\n</result>`
+            : `<result>\nCould not save to long-term memory (a storage error occurred). Continue without it.\n</result>`,
         });
         continue;
       }
@@ -301,6 +321,30 @@ export async function runAgent(opts: RunAgentOpts): Promise<ChatMessage> {
       if (tool && lastAction === null) {
         const view = readDoc(opts.editor);
         const result = frameRead(view, tool.query);
+        // A read/search with no effective query returns the whole doc; treat it
+        // as a full read for de-duplication. The doc is static this run, so a
+        // repeat yields identical bytes — swap in a back-reference instead of
+        // re-injecting them (keeps context bounded across turns).
+        const effectiveQuery = (tool.query ?? '').trim();
+        const isFullRead = !effectiveQuery;
+        const qKey = effectiveQuery.toLowerCase();
+        let resultText: string;
+        if (isFullRead && fullDocInjected) {
+          resultText =
+            '(The full document is already in this conversation and has not changed since — refer to the earlier copy above rather than re-reading it.)';
+        } else if (!isFullRead && qKey && queryCache.has(qKey)) {
+          const cached = queryCache.get(qKey)!.hits;
+          resultText = `(Same ${cached} match${
+            cached === 1 ? '' : 'es'
+          } as your earlier ${tool.kind} for "${tool.query ?? ''}" — the document is unchanged; refer to that earlier result above.)`;
+        } else {
+          resultText = result.text;
+          if (isFullRead) {
+            fullDocInjected = true;
+          } else if (qKey) {
+            queryCache.set(qKey, {hits: result.hits});
+          }
+        }
         steps.push({
           kind: tool.kind,
           query: tool.query,
@@ -312,7 +356,7 @@ export async function runAgent(opts: RunAgentOpts): Promise<ChatMessage> {
         messages.push({role: 'assistant', content: text});
         messages.push({
           role: 'user',
-          content: `<result query=${JSON.stringify(tool.query ?? '')}>\n${result.text}\n</result>`,
+          content: `<result query=${JSON.stringify(tool.query ?? '')}>\n${resultText}\n</result>`,
         });
         continue;
       }
@@ -330,12 +374,12 @@ export async function runAgent(opts: RunAgentOpts): Promise<ChatMessage> {
       '',
     );
   } catch (err) {
+    // Preserve whatever streamed before the stop/throw: prefer the current turn's
+    // partial (prose/thinking/even a completed action) over the prior turn's.
+    const prose = stripMarkup(curRaw);
+    const thinking = curNativeThink || extractThinking(curRaw);
+    const action = extractPartialAction(curRaw);
     if (isAbort(err)) {
-      // Preserve whatever streamed before the stop: prefer the current turn's
-      // partial (prose/thinking/even a completed action) over the prior turn.
-      const prose = stripMarkup(curRaw);
-      const thinking = curNativeThink || extractThinking(curRaw);
-      const action = extractPartialAction(curRaw);
       return finalize(
         opts,
         steps,
@@ -345,7 +389,22 @@ export async function runAgent(opts: RunAgentOpts): Promise<ChatMessage> {
         curRaw,
       );
     }
-    throw err;
+    // Non-abort error (backend `error` SSE event, network drop, or a helper throw
+    // that escaped its own guard): keep what already streamed and attach the error
+    // so the user doesn't lose the partial answer. MessageBubble renders the prose
+    // bubble even when an error is attached; if nothing streamed, a clean error
+    // bubble shows instead. (Resolving rather than re-throwing is deliberate — the
+    // abort branch above already proved partials are worth preserving.)
+    const msg = finalize(
+      opts,
+      steps,
+      prose || lastProse,
+      thinking || lastThinking,
+      action ?? lastAction,
+      curRaw,
+    );
+    msg.error = err instanceof Error ? err.message : String(err);
+    return msg;
   }
 }
 

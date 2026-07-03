@@ -76,42 +76,51 @@ export async function streamChat(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  for (;;) {
-    const {done, value} = await reader.read();
-    if (done) {
-      break;
+  // Any throw out of this loop (the `error` event below, a network drop, or an
+  // abort) must cancel the reader so it isn't left locked with the underlying
+  // connection held open until GC. On normal completion the stream reaches EOF and
+  // releases the reader on its own, so cancel only runs on the failure path.
+  try {
+    for (;;) {
+      const {done, value} = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, {stream: true});
+      // SSE events are separated by a blank line. Each event may itself span
+      // multiple `data:` continuations, but our backend emits one per event.
+      let sep: number;
+      while ((sep = buffer.indexOf('\n\n')) >= 0) {
+        const chunk = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        const dataLine = chunk
+          .split('\n')
+          .find(l => l.startsWith('data:'));
+        if (!dataLine) {
+          continue;
+        }
+        const payload = dataLine.slice('data:'.length).trim();
+        if (!payload) {
+          continue;
+        }
+        let ev: {type: string; delta?: string; message?: string};
+        try {
+          ev = JSON.parse(payload);
+        } catch {
+          continue;
+        }
+        if (ev.type === 'thinking' && ev.delta) {
+          h.onThinking?.(ev.delta);
+        } else if (ev.type === 'text' && ev.delta) {
+          h.onText?.(ev.delta);
+        } else if (ev.type === 'error') {
+          throw new Error(ev.message ?? 'stream error');
+        }
+        // 'done' falls through; the reader will return done=true next.
+      }
     }
-    buffer += decoder.decode(value, {stream: true});
-    // SSE events are separated by a blank line. Each event may itself span
-    // multiple `data:` continuations, but our backend emits one per event.
-    let sep: number;
-    while ((sep = buffer.indexOf('\n\n')) >= 0) {
-      const chunk = buffer.slice(0, sep);
-      buffer = buffer.slice(sep + 2);
-      const dataLine = chunk
-        .split('\n')
-        .find(l => l.startsWith('data:'));
-      if (!dataLine) {
-        continue;
-      }
-      const payload = dataLine.slice('data:'.length).trim();
-      if (!payload) {
-        continue;
-      }
-      let ev: {type: string; delta?: string; message?: string};
-      try {
-        ev = JSON.parse(payload);
-      } catch {
-        continue;
-      }
-      if (ev.type === 'thinking' && ev.delta) {
-        h.onThinking?.(ev.delta);
-      } else if (ev.type === 'text' && ev.delta) {
-        h.onText?.(ev.delta);
-      } else if (ev.type === 'error') {
-        throw new Error(ev.message ?? 'stream error');
-      }
-      // 'done' falls through; the reader will return done=true next.
-    }
+  } catch (err) {
+    await reader.cancel().catch(() => {});
+    throw err;
   }
 }
