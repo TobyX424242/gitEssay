@@ -38,7 +38,6 @@ def _seed() -> None:
                     source="init",
                     label="Initial",
                     state=json.dumps(EMPTY_STATE),
-                    markdown="",
                     created_at=now,
                 )
             )

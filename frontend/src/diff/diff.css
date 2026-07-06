@@ -58,6 +58,35 @@
   box-shadow: inset 0 -2px 0 #d9a400;
 }
 
+/* atomic-node sentinel chips (citation/equation) shown in a patch preview,
+   instead of the raw [[CITE:..]] / [[EQ:..]] token text. The diff colour class
+   (diff-added/diff-removed) is appended when the node was added/removed. */
+.diff-chip {
+  display: inline-block;
+  margin: 0 1px;
+  padding: 0 5px;
+  border: 1px solid var(--ge-border);
+  border-radius: 8px;
+  background: var(--ge-surface-2);
+  color: var(--ge-text);
+  font-size: 0.78em;
+  font-weight: 600;
+  line-height: 1.5;
+  vertical-align: baseline;
+  user-select: none;
+}
+.diff-chip--eq {
+  font-style: italic;
+}
+.diff-chip.diff-added {
+  background: #bdf5cf;
+  border-color: #7bdca1;
+}
+.diff-chip.diff-removed {
+  background: #f6c9c9;
+  border-color: #e0a3a3;
+}
+
 /* block chips */
 .diff-block {
   display: inline-block;

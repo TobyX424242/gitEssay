@@ -17,6 +17,19 @@ from typing import AsyncIterator
 import httpx
 
 
+class ModelEmptyResponse(RuntimeError):
+    """The API responded (HTTP ok) but returned no visible text. Almost always
+    `finish_reason=length` on a reasoning/thinking model whose thinking tokens
+    consumed the whole max_tokens budget. Distinct from a real connectivity or
+    auth failure (which raises an HTTP error), so the /ai/test probe can treat a
+    length-truncated reply as a successful connection."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        self.is_length = reason in ("length", "max_tokens")
+        super().__init__(f"model returned no text (finish_reason: {reason})")
+
+
 def endpoint(s) -> str:
     base = (s.base_url or "").strip().rstrip("/")
     if not base:
@@ -89,7 +102,7 @@ def _openai(s, system: str, user: str) -> str:
     text = _content_to_text(content)
     if not text.strip():
         finish = (choices[0] if choices else {}).get("finish_reason", "unknown")
-        raise RuntimeError(f"model returned no text (finish_reason: {finish})")
+        raise ModelEmptyResponse(finish)
     return text
 
 
@@ -113,9 +126,7 @@ def _anthropic(s, system: str, user: str) -> str:
     blocks = data.get("content") or []
     content = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
     if not content.strip():
-        raise RuntimeError(
-            f"model returned no text (stop_reason: {data.get('stop_reason', 'unknown')})"
-        )
+        raise ModelEmptyResponse(data.get("stop_reason", "unknown"))
     return content
 
 

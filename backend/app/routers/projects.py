@@ -36,7 +36,6 @@ def create_project(body: schemas.ProjectCreate, db: Session = Depends(get_db)):
         source="init",
         label="Initial",
         state=json.dumps(EMPTY_STATE),
-        markdown="",
         created_at=now,
     )
     db.add(project)

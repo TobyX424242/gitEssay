@@ -14,6 +14,9 @@ export interface TextRun {
   format: number; // TextNode format bitmask
   style: string; // TextNode inline CSS
   link: string | null;
+  /** When set, this run is an atomic-node chip (citation/equation) from a
+   *  sentinel token, not prose — rendered as a pill instead of raw text. */
+  kind?: 'text' | 'citation' | 'equation';
 }
 
 export type BlockKind =

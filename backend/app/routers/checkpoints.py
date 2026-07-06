@@ -5,8 +5,13 @@ Mirrors the frontend's src/checkpoints/service.ts capture/restore rules:
     `<projectId>::auto`), reparented to the latest durable checkpoint.
   - Durable (manual/init/ai-accept) checkpoints chain off the latest durable,
     then drop the auto slot; the project's current pointer advances.
+  - RETENTION: durables are capped per project (MAX_DURABLE_CHECKPOINTS); the
+    oldest are pruned when over the cap, always preserving the init baseline
+    and the current pointer. (Auto is self-bounding — a singleton.) parent_id
+    is not traversed anywhere, so pruning a mid-history node is safe.
 """
 import json
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,16 +24,17 @@ from app.models import Checkpoint, auto_slot_id, new_id, now_ms
 
 router = APIRouter(tags=["checkpoints"])
 
+# Per-project cap on durable checkpoints (manual / init / ai-accept). Auto is a
+# rolling singleton so it never counts. Env-overridable for testing.
+MAX_DURABLE_CHECKPOINTS = int(os.environ.get("GE_MAX_DURABLE_CHECKPOINTS", "100"))
+
 
 def to_out(cp: Checkpoint) -> dict:
     return {
         "id": cp.id,
         "project_id": cp.project_id,
         "parent_id": cp.parent_id,
-        "schema_version": cp.schema_version,
-        "lexical_version": cp.lexical_version,
         "state": json.loads(cp.state),
-        "markdown": cp.markdown,
         "source": cp.source,
         "label": cp.label,
         "created_at": cp.created_at,
@@ -43,6 +49,27 @@ def _latest_durable_id(db: Session, pid: str) -> Optional[str]:
         .first()
     )
     return row.id if row else None
+
+
+def _enforce_retention(db: Session, pid: str, current_id: Optional[str]) -> None:
+    """Prune oldest durable checkpoints beyond MAX_DURABLE_CHECKPOINTS. Never
+    touches the init baseline or the current pointer. parent_id is not read
+    anywhere, so deleting a node mid-chain (leaving a dangling parent ref on
+    its children) is harmless."""
+    durables = (
+        db.query(Checkpoint)
+        .filter(Checkpoint.project_id == pid, Checkpoint.source != "auto")
+        .order_by(Checkpoint.created_at.asc())
+        .all()
+    )
+    excess = len(durables) - MAX_DURABLE_CHECKPOINTS
+    for cp in durables:
+        if excess <= 0:
+            break
+        if cp.id == current_id or cp.source == "init":
+            continue
+        db.delete(cp)
+        excess -= 1
 
 
 @router.get("/projects/{pid}/checkpoints", response_model=list[schemas.CheckpointOut])
@@ -77,11 +104,13 @@ def capture_checkpoint(
         else None
     )
 
-    if body.skip_if_unchanged and current and current.markdown == body.markdown:
+    # Dedup auto-saves by comparing the serialized state directly (lossless,
+    # unlike the old markdown proxy). Compute the canonical JSON string once.
+    state_json = json.dumps(body.state)
+    if body.skip_if_unchanged and current and current.state == state_json:
         return None  # no change since the current checkpoint
 
     now = now_ms()
-    state_json = json.dumps(body.state)
 
     if body.source == "auto":
         slot_id = auto_slot_id(pid)
@@ -90,7 +119,6 @@ def capture_checkpoint(
         if slot:
             slot.parent_id = parent_id
             slot.state = state_json
-            slot.markdown = body.markdown
             slot.label = None
             slot.source = "auto"
             slot.created_at = now
@@ -100,7 +128,6 @@ def capture_checkpoint(
                 project_id=pid,
                 parent_id=parent_id,
                 state=state_json,
-                markdown=body.markdown,
                 source="auto",
                 created_at=now,
             )
@@ -120,7 +147,6 @@ def capture_checkpoint(
         project_id=pid,
         parent_id=parent_id,
         state=state_json,
-        markdown=body.markdown,
         source=body.source,
         label=body.label,
         created_at=now,
@@ -128,6 +154,8 @@ def capture_checkpoint(
     db.add(cp)
     db.query(Checkpoint).filter_by(id=auto_slot_id(pid)).delete()
     project.current_checkpoint_id = cid
+    db.flush()  # make the new durable visible to the retention count (autoflush is off)
+    _enforce_retention(db, pid, cid)
     db.commit()
     db.refresh(cp)
     return to_out(cp)

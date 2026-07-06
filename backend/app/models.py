@@ -7,9 +7,6 @@ from sqlalchemy import Column, Float, ForeignKey, Integer, String, Text
 
 from app.db import Base
 
-SCHEMA_VERSION = 1
-LEXICAL_VERSION = "0.45.1-nightly.20260623.0"
-
 # A valid empty Lexical SerializedEditorState (root + one empty paragraph).
 EMPTY_STATE = {
     "root": {
@@ -62,10 +59,7 @@ class Checkpoint(Base):
         String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
     parent_id = Column(String, nullable=True)
-    schema_version = Column(Integer, nullable=False, default=SCHEMA_VERSION)
-    lexical_version = Column(String, nullable=False, default=LEXICAL_VERSION)
     state = Column(Text, nullable=False)  # JSON string (SerializedEditorState)
-    markdown = Column(Text, nullable=False, default="")
     source = Column(String, nullable=False, default="manual")  # init|manual|auto|ai-accept
     label = Column(String, nullable=True)
     created_at = Column(Integer, nullable=False, default=now_ms, index=True)

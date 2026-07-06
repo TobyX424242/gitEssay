@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app import ai, schemas
+from app import agent_graph, ai, schemas
 from app.db import get_db
 from app.models import AISettings
 
@@ -60,12 +60,28 @@ def test_connection(body: schemas.AISettingsIn, db: Session = Depends(get_db)):
     for attr in ("provider_format", "base_url", "api_key", "model",
                  "temperature", "max_input_tokens", "max_output_tokens"):
         setattr(merged, attr, overrides.get(attr, getattr(s, attr)))
-    merged.max_output_tokens = 32
+    # Reasoning/thinking models spend tokens on thinking BEFORE any visible text,
+    # so give the probe enough room to finish and emit a reply. 32 was too tight
+    # and made every reasoner report a false "length" failure.
+    merged.max_output_tokens = 1024
     if not (merged.base_url and merged.api_key and merged.model):
         return {"ok": False, "message": "base URL, API key, and model are all required"}
     try:
         out = ai.call_model(merged, "You are a connectivity test. Reply with the single word OK.", "ping")
         return {"ok": True, "message": f"OK — {merged.provider_format}/{merged.model} replied ({len(out)} chars)."}
+    except ai.ModelEmptyResponse as e:
+        # finish_reason=length still proves the endpoint is reachable and the key
+        # works — the model just spent its budget on thinking. Treat as connected.
+        if e.is_length:
+            return {
+                "ok": True,
+                "message": (
+                    f"Connected — {merged.provider_format}/{merged.model} responded "
+                    "but hit the token cap on thinking (a reasoning model). Raise "
+                    "Max output tokens for real edits."
+                ),
+            }
+        return {"ok": False, "message": str(e)}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "message": str(e)}
 
@@ -112,6 +128,32 @@ async def chat_stream(body: schemas.ChatStreamRequest, db: Session = Depends(get
 
 
 @router.post("/agent/run")
-def agent_run():
-    """Stub — the future LangGraph agent (Phase 6) lives here."""
-    raise HTTPException(status_code=501, detail="agent not implemented yet (LangGraph phase)")
+async def agent_run(body: schemas.AgentRunRequest, db: Session = Depends(get_db)):
+    """SSE stream of the LangGraph agent run.
+
+    Events (same `data: {json}` envelope as /chat/stream):
+      {type:'thinking'|'text', delta} — reasoning / prose deltas
+      {type:'step', step:{kind,query?,note?,hits?,at}} — read/search/remember chip
+      {type:'patch', explanation, edits:[{search,replace}]} — propose_patch (terminal)
+      {type:'ask', question, options:[...]} — ask_user (terminal)
+      {type:'done'} / {type:'error', message}
+    """
+    s = _settings(db)
+    if not (s.base_url and s.api_key and s.model):
+        raise HTTPException(
+            status_code=400,
+            detail="AI is not configured (set provider/key/model in settings)",
+        )
+
+    async def gen():
+        try:
+            async for ev in agent_graph.run_agent_stream(body, s, db):
+                yield f"data: {json.dumps(ev)}\n\n"
+        except Exception as e:  # noqa: BLE001 — never let the generator die silently
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
