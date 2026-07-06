@@ -24,6 +24,7 @@
  * locating it is unambiguous; multi-block changes use multiple blocks.
  */
 import {
+  $createTextNode,
   $getNodeByKey,
   $getRoot,
   $isElementNode,
@@ -34,8 +35,20 @@ import {
   type TextNode,
 } from 'lexical';
 
-import type {DiffBlock} from '../diff/types';
+import type {DiffBlock, TextRun} from '../diff/types';
+import {$createCitationNode} from '../nodes/CitationNode';
+import {$createEquationNode} from '../nodes/EquationNode';
 import type {AssistantAction, ChatEdit} from './types';
+import {
+  blockInlineItems,
+  citeSentinel,
+  eqSentinel,
+  itemsToText,
+  type InlineItem,
+  parseSegments,
+  type Segment,
+  type SentinelKind,
+} from './sentinels';
 
 const SEARCH_START = /<{4,}\s*SEARCH\b/;
 const DIVIDER = /^={4,}\s*$/;
@@ -268,7 +281,9 @@ export function parseTurn(raw: string): {
   };
 }
 
-/** Plain text → paragraph DiffBlocks (the "new" side of an edit-card diff). */
+/** Plain text → paragraph DiffBlocks (the "new" side of an edit-card diff).
+ *  Sentinel tokens ([[CITE:..]] / [[EQ:..]]) become their own kind-marked runs
+ *  so the diff preview can render them as atomic chips instead of raw text. */
 export function plainTextToBlocks(text: string): DiffBlock[] {
   return text
     .split(/\n\s*\n/)
@@ -280,8 +295,28 @@ export function plainTextToBlocks(text: string): DiffBlock[] {
       align: '',
       direction: '',
       indent: 0,
-      runs: [{text: s, format: 0, style: '', link: null}],
+      runs: segmentRuns(s),
     }));
+}
+
+function segmentRuns(paragraph: string): TextRun[] {
+  const runs: TextRun[] = [];
+  for (const seg of parseSegments(paragraph)) {
+    if ('text' in seg) {
+      if (seg.text) {
+        runs.push({text: seg.text, format: 0, style: '', link: null});
+      }
+    } else {
+      runs.push({
+        text: seg.kind === 'cite' ? 'cite' : 'eq',
+        format: 0,
+        style: '',
+        link: null,
+        kind: seg.kind === 'cite' ? 'citation' : 'equation',
+      });
+    }
+  }
+  return runs;
 }
 
 function collectTextNodes(node: LexicalNode, out: TextNode[]): void {
@@ -295,10 +330,23 @@ function collectTextNodes(node: LexicalNode, out: TextNode[]): void {
 }
 
 /**
- * Locate `needle` in `haystack`. Returns original-index range — never a
- * normalized-space index, so callers can splice safely. Tries the verbatim text
- * first, then a trimmed variant (covers leading/trailing whitespace the model
- * may have added). Internal whitespace must match; the prompt requires verbatim.
+ * Locate `needle` in `haystack`. Returns ORIGINAL-index ranges (never a
+ * normalized-space index), so callers can splice the real text safely. Five
+ * tiers, weakest-signal-last, each more tolerant of how the model transcribed
+ * the passage:
+ *   (1) verbatim;
+ *   (2) trimmed (leading/trailing whitespace the model added);
+ *   (3) a balanced wrapping quote pair stripped ("…", '…', "…", '…');
+ *   (4) internal-whitespace-normalized — collapse every whitespace run to a
+ *       single space in both, then map the match back to original offsets
+ *       (covers reflowed line breaks, collapsed/expanded spaces);
+ *   (5) punctuation-insensitive — also map curly↔straight quotes, dash
+ *       variants→'-', ellipsis→'.', and drop zero-width/soft-hyphen marks.
+ *       This is the tier that catches "the model swapped smart quotes for
+ *       straight ones, or turned an em-dash into a hyphen" — the most common
+ *       reason an otherwise-exact copy still fails to match.
+ * Sentinel tokens are fixed-width, contain no whitespace or punctuation, and
+ * survive every tier intact.
  */
 function locate(
   haystack: string,
@@ -307,18 +355,267 @@ function locate(
   if (!needle) {
     return null;
   }
-  const i = haystack.indexOf(needle);
-  if (i >= 0) {
-    return {start: i, end: i + needle.length};
+  // (1) verbatim
+  const verbatim = haystack.indexOf(needle);
+  if (verbatim >= 0) {
+    return {start: verbatim, end: verbatim + needle.length};
   }
   const trimmed = needle.trim();
-  if (trimmed && trimmed !== needle) {
+  if (!trimmed) {
+    return null;
+  }
+  // (2) trimmed outer whitespace
+  if (trimmed !== needle) {
     const j = haystack.indexOf(trimmed);
     if (j >= 0) {
       return {start: j, end: j + trimmed.length};
     }
   }
+  // (3) drop a balanced wrapping quote pair the model added around the passage
+  const unquoted = stripWrappingQuotes(trimmed);
+  if (unquoted !== trimmed && unquoted.length > 0) {
+    const k = haystack.indexOf(unquoted);
+    if (k >= 0) {
+      return {start: k, end: k + unquoted.length};
+    }
+  }
+  // Tiers 4 & 5 match a normalized haystack; try both the trimmed and unquoted
+  // spellings of the needle against it.
+  const candidates = [trimmed, unquoted];
+  // (4) internal-whitespace-normalized
+  const ws = collapseWs(haystack);
+  for (const cand of candidates) {
+    const nNeedle = cand.replace(/\s+/g, ' ');
+    if (!nNeedle) {
+      continue;
+    }
+    const k = ws.text.indexOf(nNeedle);
+    if (k >= 0) {
+      const start = ws.map[k];
+      const endIdx = k + nNeedle.length - 1;
+      const end = (ws.map[endIdx] ?? start) + 1;
+      return {start, end};
+    }
+  }
+  // (5) punctuation/quote/dash-insensitive
+  const nm = normalizeMatch(haystack);
+  for (const cand of candidates) {
+    const nNeedle = normalizeMatch(cand).text;
+    if (!nNeedle) {
+      continue;
+    }
+    const m = nm.text.indexOf(nNeedle);
+    if (m >= 0) {
+      const start = nm.map[m];
+      const endIdx = m + nNeedle.length - 1;
+      const end = (nm.map[endIdx] ?? start) + 1;
+      return {start, end};
+    }
+  }
   return null;
+}
+
+/** Map a single character to its fuzzy-match equivalent (1:1), or '' to drop it. */
+function normChar(c: string): string {
+  switch (c) {
+    // curly single quotes / apostrophe / prime
+    case '‘':
+    case '’':
+    case '‚':
+    case '‛':
+    case '′':
+    case 'ʼ':
+      return "'";
+    // curly double quotes / guillemets
+    case '“':
+    case '”':
+    case '„':
+    case '‟':
+    case '«':
+    case '»':
+      return '"';
+    // en/em/figure dashes, minus sign
+    case '–':
+    case '—':
+    case '―':
+    case '−':
+      return '-';
+    // ellipsis
+    case '…':
+      return '.';
+    // zero-width / soft hyphen — drop (so "co­operative" matches "cooperative")
+    case '­':
+    case '​':
+    case '‌':
+    case '‍':
+    case '﻿':
+      return '';
+    default:
+      return c;
+  }
+}
+
+/**
+ * Normalize for fuzzy matching: collapse whitespace runs (incl. nbsp) to single
+ * spaces, apply `normChar` (quotes/dashes/ellipsis), and drop zero-width marks.
+ * `map[k]` is the ORIGINAL source index of the k-th emitted char, so a match can
+ * be mapped back to real offsets for splicing.
+ */
+function normalizeMatch(s: string): {text: string; map: number[]} {
+  let text = '';
+  const map: number[] = [];
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (/\s/.test(c)) {
+      text += ' ';
+      map.push(i);
+      while (i < s.length && /\s/.test(s[i])) {
+        i++;
+      }
+      continue;
+    }
+    const n = normChar(c);
+    if (n) {
+      text += n;
+      map.push(i);
+    }
+    i++;
+  }
+  return {text, map};
+}
+
+/** Strip one balanced wrapping quote pair the model may have added. */
+function stripWrappingQuotes(s: string): string {
+  const pairs: Array<[string, string]> = [
+    ['"', '"'],
+    ["'", "'"],
+    ['“', '”'],
+    ['‘', '’'],
+  ];
+  for (const [open, close] of pairs) {
+    if (s.length >= 2 && s.startsWith(open) && s.endsWith(close)) {
+      return s.slice(1, -1);
+    }
+  }
+  return s;
+}
+
+/** Collapse whitespace runs to single spaces; `map[i]` = original index of char i. */
+function collapseWs(s: string): {text: string; map: number[]} {
+  let text = '';
+  const map: number[] = [];
+  let i = 0;
+  while (i < s.length) {
+    if (/\s/.test(s[i])) {
+      text += ' ';
+      map.push(i);
+      while (i < s.length && /\s/.test(s[i])) {
+        i++;
+      }
+    } else {
+      text += s[i];
+      map.push(i);
+      i++;
+    }
+  }
+  return {text, map};
+}
+
+// --- sentinel-aware splice helpers ----------------------------------------
+interface Span {
+  start: number;
+  end: number;
+}
+
+function itemLen(it: InlineItem): number {
+  if (it.kind === 'text') {
+    return it.text.length;
+  }
+  return (it.kind === 'cite' ? citeSentinel(it.nonce) : eqSentinel(it.nonce)).length;
+}
+
+/** Per-item char spans over the block's sentinel-laden flat text. */
+function computeSpans(items: InlineItem[]): Span[] {
+  const spans: Span[] = [];
+  let pos = 0;
+  for (const it of items) {
+    const len = itemLen(it);
+    spans.push({start: pos, end: pos + len});
+    pos += len;
+  }
+  return spans;
+}
+
+function firstTouched(spans: Span[], sStart: number): number {
+  for (let i = 0; i < spans.length; i++) {
+    if (spans[i].end > sStart) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function lastTouched(spans: Span[], sEnd: number): number {
+  for (let i = spans.length - 1; i >= 0; i--) {
+    if (spans[i].start < sEnd) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/** Decorator items fully inside the search region (available to clone/remove). */
+function inRegionDecos(items: InlineItem[], spans: Span[], found: Span): InlineItem[] {
+  const out: InlineItem[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (it.kind === 'text') {
+      continue;
+    }
+    if (spans[i].start >= found.start && spans[i].end <= found.end) {
+      out.push(it);
+    }
+  }
+  return out;
+}
+
+/**
+ * Validating reconciliation (PLAN §6/T4): every sentinel in `replace` must
+ * resolve to an in-region decorator of the same kind+nonce, each consumed at
+ * most once. This forbids the model from inventing, cloning, or smuggling in
+ * an atomic node — only a sentinel that was actually in the SEARCH passage may
+ * appear in REPLACE (kept), and dropping one is an authorized delete.
+ */
+function validateReplace(
+  segs: Segment[],
+  regionDecos: InlineItem[],
+): {ok: boolean; reason?: string} {
+  // Decorator items only (text items carry no nonce); build a consume-once pool.
+  const pool = regionDecos.flatMap(d =>
+    d.kind === 'text' ? [] : [{kind: d.kind, nonce: d.nonce}],
+  );
+  for (const seg of segs) {
+    if ('text' in seg) {
+      continue;
+    }
+    const idx = pool.findIndex(p => p.kind === seg.kind && p.nonce === seg.nonce);
+    if (idx < 0) {
+      return {
+        ok: false,
+        reason:
+          seg.kind === 'cite'
+            ? 'edit references a citation that is not in the search passage'
+            : 'edit references an equation that is not in the search passage',
+      };
+    }
+    pool.splice(idx, 1);
+  }
+  return {ok: true};
+}
+
+function parentKey(node: LexicalNode): string | undefined {
+  return node.getParent()?.getKey();
 }
 
 export interface PatchResult {
@@ -326,46 +623,30 @@ export interface PatchResult {
   reason?: string;
 }
 
-interface PatchTarget {
+interface PatchDecision {
   blockKey: string;
-  /** char offset into the block's concatenated text-node text. */
   start: number;
   end: number;
+  path: 'text' | 'sentinel';
+  /** When set, the edit was located but is invalid (validation/structure). */
+  reason?: string;
 }
 
 /**
- * Synchronously locate `needle` within a single top-level block. Runs in a read
- * (definitely synchronous), so the result is authoritative before we mutate.
- */
-function findPatchTarget(editor: LexicalEditor, needle: string): PatchTarget | null {
-  let target: PatchTarget | null = null;
-  editor.getEditorState().read(() => {
-    for (const block of $getRoot().getChildren()) {
-      const tns: TextNode[] = [];
-      collectTextNodes(block, tns);
-      if (tns.length === 0) {
-        continue;
-      }
-      let concat = '';
-      for (const tn of tns) {
-        concat += tn.getTextContent();
-      }
-      const found = locate(concat, needle);
-      if (found) {
-        target = {blockKey: block.getKey(), start: found.start, end: found.end};
-        return;
-      }
-    }
-  });
-  return target;
-}
-
-/**
- * Locate `search` verbatim within a single top-level block and replace it with
- * `replace`. Locating happens in a synchronous read; the splice happens in an
- * `editor.update` (which returns void in this Lexical version, so we do NOT
- * chain on it — we report success from the synchronous locate). The replacement
- * inherits the first covering node's formatting.
+ * Locate `search` within a single top-level block and replace it with `replace`.
+ *
+ * Two splice paths:
+ *  - `text`  — the search passage contains no atomic node. Reuses the proven
+ *    text-node splice (works even when the text is nested, e.g. inside a link).
+ *  - `sentinel` — the passage spans a citation/equation. Requires every touched
+ *    node to be a direct child of the block (the realistic prose case), so the
+ *    decorator can be cloned/removed predictably. `replace`'s sentinels are
+ *    validated against the in-region decorators (see `validateReplace`).
+ *
+ * Locating + the validity decision run in a synchronous read (authoritative
+ * before any mutation); the splice runs in an `editor.update`. The update
+ * re-derives items (the read's node refs are invalid in the update state); the
+ * state is unchanged between the two, so the same offsets locate the same range.
  */
 export function applyTextPatch(
   editor: LexicalEditor,
@@ -376,53 +657,258 @@ export function applyTextPatch(
   if (needle.length === 0) {
     return Promise.resolve({ok: false, reason: 'empty search text'});
   }
-  const target = findPatchTarget(editor, needle);
-  if (!target) {
+  const replaceSegs = parseSegments(replace);
+
+  // Phase 1 (read): locate, choose the path, validate sentinels.
+  let decision: PatchDecision | null = null;
+  editor.getEditorState().read(() => {
+    for (const block of $getRoot().getChildren()) {
+      const items = blockInlineItems(block);
+      if (items.length === 0) {
+        continue;
+      }
+      const text = itemsToText(items);
+      const found = locate(text, needle);
+      if (!found) {
+        continue;
+      }
+      const spans = computeSpans(items);
+      const a = firstTouched(spans, found.start);
+      const b = lastTouched(spans, found.end);
+      if (a < 0 || b < 0) {
+        continue;
+      }
+      const blockKey = block.getKey();
+      const touched = items.slice(a, b + 1);
+      const hasDeco = touched.some(it => it.kind !== 'text');
+
+      let path: 'text' | 'sentinel' = 'text';
+      if (hasDeco) {
+        const flat = touched.every(it => parentKey(it.node) === blockKey);
+        if (!flat) {
+          decision = {
+            blockKey,
+            start: found.start,
+            end: found.end,
+            path: 'sentinel',
+            reason:
+              'edit spans nested formatting around a citation/equation — select a simpler passage',
+          };
+          return;
+        }
+        path = 'sentinel';
+      }
+
+      const regionDecos = inRegionDecos(items, spans, found);
+      const v = validateReplace(replaceSegs, regionDecos);
+      if (!v.ok) {
+        decision = {blockKey, start: found.start, end: found.end, path, reason: v.reason};
+        return;
+      }
+      decision = {blockKey, start: found.start, end: found.end, path};
+      return;
+    }
+  });
+
+  if (!decision) {
     return Promise.resolve({ok: false, reason: 'passage not found in the document'});
   }
+  if (decision.reason) {
+    return Promise.resolve({ok: false, reason: decision.reason});
+  }
+
+  // Phase 2 (update): execute the chosen splice.
+  const d = decision;
+  const replaceText = replaceSegs.map(s => ('text' in s ? s.text : '')).join('');
   editor.update(() => {
-    const block = $getNodeByKey(target.blockKey);
+    const block = $getNodeByKey(d.blockKey);
     if (!$isElementNode(block)) {
       return;
     }
-    const tns: TextNode[] = [];
-    collectTextNodes(block, tns);
-    if (tns.length === 0) {
-      return;
-    }
-    const lens = tns.map(t => t.getTextContent().length);
-    const starts: number[] = [];
-    let concat = '';
-    for (let k = 0; k < tns.length; k++) {
-      starts.push(concat.length);
-      concat += tns[k].getTextContent();
-    }
-    // The same editor state as the locate pass, so target offsets are valid.
-    const idx = target.start;
-    const end = target.end;
-    let firstIdx = -1;
-    let lastIdx = -1;
-    for (let k = 0; k < tns.length; k++) {
-      const a = starts[k];
-      const b = a + lens[k];
-      if (firstIdx === -1 && idx < b) {
-        firstIdx = k;
-      }
-      if (end > a) {
-        lastIdx = k;
-      }
-    }
-    if (firstIdx < 0 || lastIdx < 0) {
-      return;
-    }
-    const firstNode = tns[firstIdx];
-    const lastNode = tns[lastIdx];
-    const prefix = firstNode.getTextContent().slice(0, idx - starts[firstIdx]);
-    const suffix = lastNode.getTextContent().slice(end - starts[lastIdx]);
-    firstNode.setTextContent(prefix + replace + suffix);
-    for (let k = firstIdx + 1; k <= lastIdx; k++) {
-      tns[k].remove();
+    if (d.path === 'sentinel') {
+      sentinelSplice(block, needle, replaceSegs);
+    } else {
+      textSplice(block, needle, replaceText);
     }
   });
   return Promise.resolve({ok: true});
+}
+
+/** Text-only splice (no atomic nodes in the passage). Nesting-safe. */
+function textSplice(block: ElementNode, needle: string, replaceText: string): void {
+  const tns: TextNode[] = [];
+  collectTextNodes(block, tns);
+  if (tns.length === 0) {
+    return;
+  }
+  const lens = tns.map(t => t.getTextContent().length);
+  const starts: number[] = [];
+  let concat = '';
+  for (let k = 0; k < tns.length; k++) {
+    starts.push(concat.length);
+    concat += tns[k].getTextContent();
+  }
+  const found = locate(concat, needle);
+  if (!found) {
+    return;
+  }
+  const idx = found.start;
+  const end = found.end;
+  let firstIdx = -1;
+  let lastIdx = -1;
+  for (let k = 0; k < tns.length; k++) {
+    const s = starts[k];
+    const e = s + lens[k];
+    if (firstIdx === -1 && idx < e) {
+      firstIdx = k;
+    }
+    if (end > s) {
+      lastIdx = k;
+    }
+  }
+  if (firstIdx < 0 || lastIdx < 0) {
+    return;
+  }
+  const firstNode = tns[firstIdx];
+  const lastNode = tns[lastIdx];
+  const prefix = firstNode.getTextContent().slice(0, idx - starts[firstIdx]);
+  const suffix = lastNode.getTextContent().slice(end - starts[lastIdx]);
+  firstNode.setTextContent(prefix + replaceText + suffix);
+  for (let k = firstIdx + 1; k <= lastIdx; k++) {
+    tns[k].remove();
+  }
+}
+
+/**
+ * Sentinel splice (the passage spans citations/equations). The touched nodes
+ * are direct children of the block, so we rebuild the inline sequence: keep the
+ * partial prefix/suffix text nodes (re-texted), clone the in-region decorator
+ * nodes the model chose to keep, drop the ones it omitted, and insert the rest.
+ */
+function sentinelSplice(block: ElementNode, needle: string, segs: Segment[]): void {
+  const items = blockInlineItems(block);
+  if (items.length === 0) {
+    return;
+  }
+  const text = itemsToText(items);
+  const found = locate(text, needle);
+  if (!found) {
+    return;
+  }
+  const spans = computeSpans(items);
+  const a = firstTouched(spans, found.start);
+  const b = lastTouched(spans, found.end);
+  if (a < 0 || b < 0) {
+    return;
+  }
+  const aItem = items[a];
+  const bItem = items[b];
+
+  // Only text items can carry a partial prefix/suffix (decorators are atomic).
+  let prefixItem =
+    aItem.kind === 'text' && spans[a].start < found.start ? aItem : null;
+  let suffixItem =
+    bItem.kind === 'text' && spans[b].end > found.end ? bItem : null;
+  const prefixText =
+    prefixItem && prefixItem.kind === 'text'
+      ? prefixItem.text.slice(0, found.start - spans[a].start)
+      : '';
+  const suffixText =
+    suffixItem && suffixItem.kind === 'text'
+      ? suffixItem.text.slice(found.end - spans[b].start)
+      : '';
+  if (prefixText === '') {
+    prefixItem = null;
+  }
+  if (suffixText === '') {
+    suffixItem = null;
+  }
+
+  const touched = items.slice(a, b + 1);
+  const firstTextItem =
+    prefixItem ?? suffixItem ?? touched.find(it => it.kind === 'text');
+  const firstFormat = firstTextItem?.kind === 'text' ? firstTextItem.node.getFormat() : 0;
+
+  // In-region decorator pool; consume one per sentinel in `replace`.
+  const pool: InlineItem[] = touched.filter(it => it.kind !== 'text');
+  const cloneDeco = (kind: SentinelKind, nonce: string): LexicalNode | null => {
+    const idx = pool.findIndex(it => it.kind === kind && it.nonce === nonce);
+    if (idx < 0) {
+      return null;
+    }
+    // Reconstruct a fresh node carrying the same identity (citation id / LaTeX),
+    // via the type-safe factories rather than the loosely-typed instance clone.
+    const got = pool.splice(idx, 1)[0];
+    if (got.kind === 'cite') {
+      return $createCitationNode(got.node.getLabel(), got.node.getCitationId());
+    }
+    if (got.kind === 'eq') {
+      return $createEquationNode(got.node.getEquation(), got.node.isInline());
+    }
+    return null;
+  };
+
+  const sameCarrier =
+    !!prefixItem && !!suffixItem && prefixItem.node.getKey() === suffixItem.node.getKey();
+
+  const newNodes: LexicalNode[] = [];
+  let firstReplaceTextDone = false;
+  const makeText = (s: string, format: number): TextNode => {
+    const n = $createTextNode(s);
+    n.setFormat(format);
+    return n;
+  };
+  for (const seg of segs) {
+    if ('text' in seg) {
+      if (seg.text.length === 0) {
+        continue;
+      }
+      const fmt = firstReplaceTextDone ? 0 : firstFormat;
+      firstReplaceTextDone = true;
+      newNodes.push(makeText(seg.text, fmt));
+    } else {
+      const clone = cloneDeco(seg.kind, seg.nonce);
+      if (clone) {
+        newNodes.push(clone);
+      }
+    }
+  }
+  if (sameCarrier && suffixText) {
+    // The single carrier now holds the prefix; the suffix rides at the tail.
+    newNodes.push(makeText(suffixText, firstFormat));
+  }
+
+  // Re-text the kept carriers, then remove everything else in the touched range.
+  if (prefixItem && prefixItem.kind === 'text') {
+    prefixItem.node.setTextContent(prefixText);
+  }
+  if (suffixItem && suffixItem.kind === 'text' && !sameCarrier) {
+    suffixItem.node.setTextContent(suffixText);
+  }
+  const removeNodes = touched
+    .filter(it => it !== prefixItem && it !== suffixItem)
+    .map(it => it.node);
+
+  // Insert the replacement nodes at the right gap, then drop the consumed nodes.
+  if (prefixItem) {
+    let after: LexicalNode = prefixItem.node;
+    removeNodes.forEach(n => n.remove());
+    for (const n of newNodes) {
+      after.insertAfter(n);
+      after = n;
+    }
+  } else if (suffixItem) {
+    removeNodes.forEach(n => n.remove());
+    for (const n of newNodes) {
+      suffixItem.node.insertBefore(n);
+    }
+  } else {
+    // Whole range is inner — insert before the first touched node (it gets
+    // removed too, but the new nodes stay as its preceding siblings).
+    const ref = touched[0].node;
+    for (const n of newNodes) {
+      ref.insertBefore(n);
+    }
+    removeNodes.forEach(n => n.remove());
+  }
 }

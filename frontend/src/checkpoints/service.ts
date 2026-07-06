@@ -3,17 +3,15 @@
  *
  * Thin async ops over the FastAPI API + a pub/sub so React re-renders. The DAG
  * semantics (rolling auto singleton, manual chaining, current pointer) live on
- * the backend; this just sends the editor state/markdown and maps responses.
+ * the backend; this just sends the editor state and maps responses.
  * Operations default to the active project (projectStore).
  */
-import {$convertToMarkdownString} from '@lexical/markdown';
 import {
   CLEAR_HISTORY_COMMAND,
   type LexicalEditor,
   type SerializedEditorState,
 } from 'lexical';
 
-import {PLAYGROUND_TRANSFORMERS} from '../plugins/MarkdownTransformers';
 import {getActiveProjectId} from '../projects/projectStore';
 import {api} from '../utils/api';
 import type {Checkpoint, CheckpointSource} from './types';
@@ -41,24 +39,11 @@ function emit(): void {
   listeners.forEach(l => l());
 }
 
-function readMarkdown(editor: LexicalEditor): string {
-  try {
-    return editor.getEditorState().read(() =>
-      $convertToMarkdownString(PLAYGROUND_TRANSFORMERS),
-    );
-  } catch {
-    return '';
-  }
-}
-
 interface ApiCheckpoint {
   id: string;
   project_id: string;
   parent_id: string | null;
-  schema_version: number;
-  lexical_version: string;
   state: SerializedEditorState;
-  markdown: string;
   source: CheckpointSource;
   label: string | null;
   created_at: number;
@@ -69,10 +54,7 @@ function map(c: ApiCheckpoint): Checkpoint {
     id: c.id,
     projectId: c.project_id,
     parentId: c.parent_id,
-    schemaVersion: c.schema_version,
-    lexicalVersion: c.lexical_version,
     state: c.state,
-    markdown: c.markdown,
     source: c.source,
     label: c.label ?? undefined,
     createdAt: c.created_at,
@@ -110,12 +92,10 @@ export async function captureCheckpoint(
     return null;
   }
   const state = editor.getEditorState().toJSON() as SerializedEditorState;
-  const markdown = readMarkdown(editor);
   const c = await api.post<ApiCheckpoint | null>(
     `/projects/${projectId}/checkpoints`,
     {
       state,
-      markdown,
       label: opts.label ?? null,
       source: opts.source,
       skip_if_unchanged: opts.skipIfUnchanged ?? false,

@@ -18,10 +18,7 @@ export interface Checkpoint {
   id: string;
   projectId: string;
   parentId: string | null;
-  schemaVersion: number;
-  lexicalVersion: string;
   state: SerializedEditorState;
-  markdown: string;
   createdAt: number;
   label?: string;
   source: CheckpointSource;

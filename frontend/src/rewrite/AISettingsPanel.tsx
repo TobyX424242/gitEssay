@@ -8,6 +8,7 @@
 import {type JSX, useState} from 'react';
 import {createPortal} from 'react-dom';
 
+import {type AgentEngine, setAgentEngine, useAgentEngine} from '../chat/agentEngine';
 import {
   type AISettings,
   type ProviderFormat,
@@ -27,6 +28,7 @@ export default function AISettingsPanel({
   onClose: () => void;
 }): JSX.Element {
   const current = useAISettings();
+  const agentEngine = useAgentEngine();
   const [draft, setDraft] = useState<AISettings>(() => ({...current}));
   const [showKey, setShowKey] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(
@@ -165,6 +167,25 @@ export default function AISettingsPanel({
               autoComplete="off"
             />
           </label>
+
+          <label className="ai-field">
+            <span className="ai-label">
+              Agent engine <span className="ai-hint">experimental</span>
+            </span>
+            <select
+              className="cp-input"
+              value={agentEngine}
+              onChange={e => setAgentEngine(e.target.value as AgentEngine)}>
+              <option value="frontend">Frontend loop (default)</option>
+              <option value="langgraph">LangGraph (backend)</option>
+            </select>
+          </label>
+          {agentEngine === 'langgraph' && (
+            <p className="ai-note ai-note--muted">
+              The LangGraph engine needs a model/endpoint that supports tool
+              calling. If yours doesn't, switch back to Frontend loop.
+            </p>
+          )}
 
           <button
             type="button"

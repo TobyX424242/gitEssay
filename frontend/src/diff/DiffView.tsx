@@ -128,15 +128,33 @@ function runsAsOps(runs: TextRun[] | undefined, type: WordOpType): WordOp[] {
 }
 
 function renderWordOps(ops: WordOp[], kp: string): JSX.Element[] {
-  return ops.map((op, i) => (
-    <span
-      key={`${kp}-${i}`}
-      className={wordClass(op.type, op.run.text)}
-      style={runStyle(op.run)}
-      title={op.run.link ?? undefined}>
-      {op.run.text}
-    </span>
-  ));
+  return ops.map((op, i) => {
+    const kind = op.run.kind;
+    if (kind === 'citation' || kind === 'equation') {
+      // An atomic-node sentinel rendered as a chip. Keep the diff colour class
+      // so a kept node reads neutral, an added one green, a removed one red.
+      const cls = wordClass(op.type, op.run.text);
+      return (
+        <span
+          key={`${kp}-${i}`}
+          className={`diff-chip diff-chip--${kind === 'citation' ? 'cite' : 'eq'}${
+            cls ? ` ${cls}` : ''
+          }`}
+          title={kind === 'citation' ? 'citation marker' : 'equation'}>
+          {kind === 'citation' ? 'cite' : 'eq'}
+        </span>
+      );
+    }
+    return (
+      <span
+        key={`${kp}-${i}`}
+        className={wordClass(op.type, op.run.text)}
+        style={runStyle(op.run)}
+        title={op.run.link ?? undefined}>
+        {op.run.text}
+      </span>
+    );
+  });
 }
 
 function diffTableCells(

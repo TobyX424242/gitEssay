@@ -20,8 +20,8 @@ services:
     environment:
       GITESSAY_DB: /app/data/gitessay.db
     volumes:
-      #- gitessay-data:/app/data
-      - ./backend/gitessay.db:/app/data/gitessay.db
+      - gitessay-data:/app/data
+      #- ./backend/gitessay.db:/app/data/gitessay.db
     expose:
       - "8000" # internal only — the frontend proxies to it
     restart: unless-stopped

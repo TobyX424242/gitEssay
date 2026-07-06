@@ -39,6 +39,7 @@ import {
 } from './conversations';
 import Markdown from './Markdown';
 import {applyTextPatch, plainTextToBlocks} from './patch';
+import {selectionToSentinelText} from './sentinels';
 import {chatPanel, closePanel, openPanel, usePanelOpen, usePanelWidth} from './panelStore';
 import {
   addMemory,
@@ -49,6 +50,8 @@ import {
   useMemoryEnabled,
 } from './memories';
 import {useActiveProjectId} from '../projects/projectStore';
+import {runAgentGraph} from './agentClient';
+import {useAgentEngine} from './agentEngine';
 import {messagesToHistory, runAgent} from './providers';
 import type {ChatEditState, ChatMessage, ChatMode, MessageContext} from './types';
 import {SidePanelResizer} from '../ui/SidePanelResizer';
@@ -89,6 +92,7 @@ export default function ChatSidebar(): JSX.Element {
   const messages = active?.messages ?? [];
   const memories = useMemories(activeProjectId);
   const memoryEnabled = useMemoryEnabled();
+  const agentEngine = useAgentEngine();
 
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState<ChatMessage | null>(null);
@@ -165,15 +169,14 @@ export default function ChatSidebar(): JSX.Element {
   }, [notice]);
 
   const captureSelection = useCallback((instruction: string): SendContext => {
-    let ctx: SendContext = {mode: 'document'};
-    editor.getEditorState().read(() => {
-      const sel = $getSelection();
-      if ($isRangeSelection(sel) && !sel.isCollapsed()) {
-        ctx = {mode: 'selection', selectionText: sel.getTextContent()};
-      }
-    });
+    // Sentinel-laden selection text (citations/equations → opaque tokens), so a
+    // patch the model writes against the selection locates consistently in the
+    // live document (whose decorator nodes flatten to the same tokens).
+    const selectionText = selectionToSentinelText(editor);
     void instruction; // instruction is stored separately on the user message
-    return ctx;
+    return selectionText && selectionText.length > 0
+      ? {mode: 'selection', selectionText}
+      : {mode: 'document'};
   }, [editor]);
 
   /**
@@ -219,7 +222,7 @@ export default function ChatSidebar(): JSX.Element {
       });
 
       const history = messagesToHistory(args.priorMessages);
-      runAgent({
+      const runOpts = {
         editor,
         instruction: args.instruction,
         mode: args.mode,
@@ -235,7 +238,15 @@ export default function ChatSidebar(): JSX.Element {
         },
         onUpdate: patch =>
           setStreaming(s => (s && s.id === args.streamingId ? {...s, ...patch} : s)),
-      })
+      };
+      // Engine toggle: the backend LangGraph agent, or the legacy in-browser loop.
+      // Both share the RunAgentOpts contract and resolve to the same ChatMessage
+      // shape, so the .then/.catch/.finally below is identical for both.
+      const runPromise =
+        agentEngine === 'langgraph'
+          ? runAgentGraph({...runOpts, projectId: activeProjectId ?? ''})
+          : runAgent(runOpts);
+      runPromise
         .then(msg => {
           const final: ChatMessage = {...msg, id: args.streamingId};
           if (args.replace) {
@@ -265,7 +276,7 @@ export default function ChatSidebar(): JSX.Element {
           abortRef.current = null;
         });
     },
-    [activeProjectId, configured, editor, memories, memoryEnabled],
+    [activeProjectId, agentEngine, configured, editor, memories, memoryEnabled],
   );
 
   const send = useCallback(

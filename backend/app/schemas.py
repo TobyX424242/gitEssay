@@ -29,10 +29,7 @@ class CheckpointOut(BaseModel):
     id: str
     project_id: str
     parent_id: Optional[str] = None
-    schema_version: int
-    lexical_version: str
     state: dict[str, Any]
-    markdown: str
     source: str
     label: Optional[str] = None
     created_at: int
@@ -42,7 +39,6 @@ class CheckpointOut(BaseModel):
 
 class CheckpointCapture(BaseModel):
     state: dict[str, Any]
-    markdown: str = ""
     label: Optional[str] = None
     source: str = "manual"
     skip_if_unchanged: bool = False
@@ -142,3 +138,17 @@ class AISettingsIn(BaseModel):
 class TestResult(BaseModel):
     ok: bool
     message: str
+
+
+# --- agent (LangGraph) -----------------------------------------------------
+class AgentRunRequest(BaseModel):
+    """One agent run over the LangGraph backend. The frontend sends the live
+    document snapshot (sentinel-laden paragraphs) because the backend has no live
+    editor; the agent reads/searches that snapshot via tools."""
+    project_id: str
+    instruction: str
+    mode: str = "document"  # 'selection' | 'document'
+    selection_text: str = ""
+    doc_paragraphs: list[str]
+    history: list[dict[str, Any]] = []  # [{role: 'user'|'assistant', content: str}]
+    memory_enabled: bool = False

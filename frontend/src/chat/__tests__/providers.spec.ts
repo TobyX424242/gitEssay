@@ -4,6 +4,8 @@ import {
   $createTextNode,
   $getRoot,
   createEditor,
+  ParagraphNode,
+  TextNode,
   type LexicalEditor,
 } from 'lexical';
 
@@ -13,6 +15,8 @@ vi.mock('../../rewrite/llmClient', () => ({
 
 // Imported AFTER vi.mock so the mock replaces the module providers.ts depends on.
 import {streamChat} from '../../rewrite/llmClient';
+import {CitationNode, $createCitationNode} from '../../nodes/CitationNode';
+import {EquationNode} from '../../nodes/EquationNode';
 import {runAgent} from '../providers';
 
 async function makeEditor(paras: string[]): Promise<LexicalEditor> {
@@ -152,5 +156,36 @@ describe('runAgent', () => {
 
     expect(msg.text).toContain('Partial answer');
     expect(msg.error).toBeUndefined();
+  });
+
+  it('T4: the document is flattened with opaque citation sentinels (not labels)', async () => {
+    const editor = createEditor({
+      nodes: [ParagraphNode, TextNode, CitationNode, EquationNode],
+      onError(err) {
+        throw err;
+      },
+    });
+    await editor.update(() => {
+      const root = $getRoot();
+      root.append(
+        $createParagraphNode()
+          .append($createTextNode('See '))
+          .append($createCitationNode('Smith 2020', 'c1'))
+          .append($createTextNode(' for more.')),
+      );
+    });
+
+    const calls: string[] = [];
+    vi.mocked(streamChat).mockImplementation(async (req: any, h: any) => {
+      calls.push(req.messages[req.messages.length - 1].content);
+      h.onText?.('<action>{"kind":"finish","summary":"done"}</action>');
+    });
+
+    await runAgent(baseOpts(editor) as any);
+
+    // Document mode embeds the whole doc in the first user message: a citation
+    // must appear as an opaque [[CITE:..]] token, never its guessable label.
+    expect(calls[0]).toContain('[[CITE:');
+    expect(calls[0]).not.toContain('Smith 2020');
   });
 });

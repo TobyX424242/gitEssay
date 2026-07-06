@@ -26,7 +26,6 @@ import useModal from '../hooks/useModal';
 import ProjectSwitcher from '../projects/ProjectSwitcher';
 import {docFromHash} from '../utils/docSerialization';
 import Button from './Button';
-import OverflowToolbar from './OverflowToolbar';
 import {useSidePanel} from './sidePanelStore';
 import ThemeToggle from './ThemeToggle';
 import './appBar.css';
@@ -101,12 +100,7 @@ export default function AppActionBar(): JSX.Element {
         <span className="app-bar-title">gitEssay</span>
         <ProjectSwitcher />
       </div>
-      <OverflowToolbar
-        className="app-bar-actions"
-        buttonClassName="app-bar-btn app-bar-overflow"
-        dividerClassName="app-bar-divider"
-        moreLabel="More actions"
-        lessLabel="Collapse">
+      <div className="app-bar-actions">
         <button
           type="button"
           className="app-bar-btn"
@@ -168,7 +162,7 @@ export default function AppActionBar(): JSX.Element {
         </button>
         <span className="app-bar-divider" />
         <ThemeToggle />
-      </OverflowToolbar>
+      </div>
       {modal}
     </div>
   );

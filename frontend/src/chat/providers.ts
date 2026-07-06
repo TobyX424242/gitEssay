@@ -26,6 +26,7 @@ import {
   parseTurn,
   stripMarkup,
 } from './patch';
+import {blockInlineItems, itemsToText} from './sentinels';
 import type {
   AgentStep,
   AssistantAction,
@@ -72,7 +73,7 @@ export function buildSystemPrompt(opts: {
   }
   lines.push(
     '  {"kind":"patch","explanation":"...","edits":[{"search":"...","replace":"..."}]}',
-    '                                          — propose edits. `explanation` is REQUIRED and becomes the version label for this edit (like a commit message: one short imperative line, e.g. "Tighten topic sentence"). `search` is copied VERBATIM from the document (enough context to be unique, within ONE paragraph — never across paragraphs); you may emit several edits. Preserve every citation marker ([1], (Smith, 2020)) and LaTeX ($...$, $$...$$) verbatim. Do NOT wrap anything in markdown code fences.',
+    '                                          — propose edits. `explanation` is REQUIRED and becomes the version label for this edit: a single short imperative line (~6–10 words) that names the SPECIFIC subject of the change, not just the action — "Clarify the data-collection steps", not "Clarify"; "Soften the causality claim", not "Rephrase". Keep it a label, not a full sentence. `search` is the SHORTEST span unique in the document (a phrase or single sentence — shorter matches more reliably), copied CHARACTER-FOR-CHARACTER within ONE paragraph (never across paragraphs): reproduce every space, punctuation mark, and quotation mark exactly as written (including any curly/straight quotes and dashes); do not reflow or re-punctuate. You may emit several edits. Citations and equations appear in the document as OPAQUE TOKENS like [[CITE:1a2b3c4d]] and [[EQ:9e8f7a6b]] — treat each token as a single indivisible unit: copy it VERBATIM into search and replace; never modify, split, merge, or invent one. To KEEP a token, copy it unchanged into replace; to REMOVE it, omit the token from replace. Do NOT wrap anything in markdown code fences.',
     '  {"kind":"ask","question":"...","options":["...","..."]}',
     '                                          — ask the user a clarifying question with concrete options. The UI always appends a free-text choice, so do NOT add an "Other" option yourself. Use this whenever the request is ambiguous and the answer changes what you do.',
     '  {"kind":"finish","summary":"..."}       — you are done; summarize briefly what you did (or did not) change.',
@@ -126,13 +127,28 @@ interface DocView {
   full: string;
 }
 
-function readDoc(editor: LexicalEditor): DocView {
+/**
+ * Flatten the live editor to a list of sentinel-laden paragraphs (citations /
+ * equations become opaque [[CITE:..]]/[[EQ:..]] tokens so the model treats them
+ * as atomic). Shared by the frontend agent loop (readDoc) and the LangGraph
+ * engine, which ships this snapshot to the backend (the backend has no live
+ * editor, so the frontend must send the current document state with each run).
+ */
+export function docParagraphs(editor: LexicalEditor): string[] {
   let paragraphs: string[] = [];
   editor.getEditorState().read(() => {
     paragraphs = $getRoot()
       .getChildren()
-      .map(b => b.getTextContent());
+      .map(b => {
+        const items = blockInlineItems(b);
+        return items.length > 0 ? itemsToText(items) : b.getTextContent();
+      });
   });
+  return paragraphs;
+}
+
+function readDoc(editor: LexicalEditor): DocView {
+  const paragraphs = docParagraphs(editor);
   return {paragraphs, full: paragraphs.join('\n\n')};
 }
 
