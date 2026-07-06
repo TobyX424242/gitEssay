@@ -648,7 +648,7 @@ interface PatchDecision {
  * re-derives items (the read's node refs are invalid in the update state); the
  * state is unchanged between the two, so the same offsets locate the same range.
  */
-export function applyTextPatch(
+export async function applyTextPatch(
   editor: LexicalEditor,
   search: string,
   replace: string,
@@ -720,7 +720,13 @@ export function applyTextPatch(
   // Phase 2 (update): execute the chosen splice.
   const d = decision;
   const replaceText = replaceSegs.map(s => ('text' in s ? s.text : '')).join('');
-  editor.update(() => {
+  // Await the update so callers see the COMMITTED editor state. Without this, a
+  // caller that reads the doc right after (notably retry: it reverts patches then
+  // immediately re-runs the agent, which snapshots the doc) could read the
+  // PRE-edit state — and the agent would see the old patch still applied and
+  // produce no new patch. It also ensures a checkpoint captured just after
+  // reflects the post-edit state, not the pre-edit one.
+  await editor.update(() => {
     const block = $getNodeByKey(d.blockKey);
     if (!$isElementNode(block)) {
       return;
@@ -731,7 +737,7 @@ export function applyTextPatch(
       textSplice(block, needle, replaceText);
     }
   });
-  return Promise.resolve({ok: true});
+  return {ok: true};
 }
 
 /** Text-only splice (no atomic nodes in the passage). Nesting-safe. */

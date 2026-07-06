@@ -10,6 +10,7 @@
  */
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {$getRoot, $getSelection, $isRangeSelection} from 'lexical';
+import {createPortal} from 'react-dom';
 import {
   type JSX,
   useCallback,
@@ -81,6 +82,29 @@ function truncate(s: string, n: number): string {
 /** Context captured at send time and stored on the user message (drives Retry). */
 type SendContext = MessageContext;
 
+/** One response whose accepted edits will be reverted before a retry. */
+interface RetryRevertItem {
+  msgId: string;
+  /** Patch explanation (the version label) — shown in the confirm dialog. */
+  label: string;
+  count: number;
+}
+
+/** A planned retry: revert a LIFO batch of accepted patches, then regenerate. */
+interface PendingRetry {
+  convId: string;
+  targetId: string;
+  instruction: string;
+  mode: ChatMode;
+  selectionText?: string;
+  priorMessages: ChatMessage[];
+  /** Snapshot at click time — edits still carry the 'applied' state to revert. */
+  messages: ChatMessage[];
+  /** Chronological (target → latest); doRetry reverses this for LIFO undo. */
+  items: RetryRevertItem[];
+  totalEdits: number;
+}
+
 export default function ChatSidebar(): JSX.Element {
   const [editor] = useLexicalComposerContext();
   const open = usePanelOpen();
@@ -98,6 +122,7 @@ export default function ChatSidebar(): JSX.Element {
   const [streaming, setStreaming] = useState<ChatMessage | null>(null);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<{text: string; key: number} | null>(null);
+  const [pendingRetry, setPendingRetry] = useState<PendingRetry | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
   const [showList, setShowList] = useState(false);
@@ -106,6 +131,10 @@ export default function ChatSidebar(): JSX.Element {
   );
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // The message id kept in view during/after a retry (its target), so the live
+  // stream and the finalized patch card don't get scrolled off to the bottom.
+  // Set on a retry, cleared on a fresh send or a conversation switch.
+  const pinnedIdRef = useRef<string | null>(null);
   const trapRef = useScrollTrap();
   const abortRef = useRef<AbortController | null>(null);
   // Re-entrancy guard for the accept/revert paths. Applying edits + persisting
@@ -151,12 +180,33 @@ export default function ChatSidebar(): JSX.Element {
     return editor.registerUpdateListener(probe);
   }, [editor]);
 
-  // Autoscroll to the latest content (persisted messages + the live stream).
+  // A retry streams INTO an existing message's slot, so the live Thoughts pane and
+  // patch card stay at the original position (not the conversation bottom). A
+  // fresh send has a brand-new id and renders at the end as usual.
+  const streamingInPlace = !!streaming && messages.some(m => m.id === streaming.id);
+
+  // Clear the pin when switching conversations so a stale target doesn't pin.
+  useEffect(() => {
+    pinnedIdRef.current = null;
+  }, [active?.id]);
+
+  // Keep the newest content in view. A fresh send scrolls to the bottom; a retry
+  // pins its target so the live stream AND the finalized patch card stay visible
+  // at the original slot — not jumping to the bottom when the patch lands.
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
+    if (!el) {
+      return;
     }
+    const pin = pinnedIdRef.current;
+    if (pin) {
+      const node = el.querySelector(`[data-msg-id="${CSS.escape(pin)}"]`);
+      if (node instanceof HTMLElement) {
+        node.scrollIntoView({block: 'nearest'});
+        return;
+      }
+    }
+    el.scrollTop = el.scrollHeight;
   }, [messages, streaming, loading]);
 
   // Auto-dismiss the transient notice banner.
@@ -210,6 +260,9 @@ export default function ChatSidebar(): JSX.Element {
       }
       const controller = new AbortController();
       abortRef.current = controller;
+      // Pin a retry's target into view (live stream + finalized patch card); a
+      // fresh send has no pin, so it scrolls to the bottom as usual.
+      pinnedIdRef.current = args.replace ? args.streamingId : null;
       setLoading(true);
       setStreaming({
         id: args.streamingId,
@@ -312,96 +365,160 @@ export default function ChatSidebar(): JSX.Element {
     [active, captureSelection, input, loading, startRun],
   );
 
-  const retry = useCallback(
-    async (assistantId: string) => {
+  /**
+   * Build the retry plan: every applied patch from the target (inclusive) onward
+   * must be reverted so the document rolls back to its state just before this
+   * turn — otherwise a later patch's text still overlays the region and the new
+   * attempt's SEARCH won't match. Returns null if the target isn't retryable.
+   */
+  const planRetry = useCallback(
+    (assistantId: string): PendingRetry | null => {
       if (!active || loading || acceptingRef.current) {
-        return;
+        return null;
       }
       const convId = active.id;
       const msgs = active.messages;
       const idx = msgs.findIndex(m => m.id === assistantId);
       if (idx < 1) {
-        return;
+        return null;
       }
       const userMsg = msgs[idx - 1];
       if (userMsg.role !== 'user') {
-        return;
+        return null;
       }
-      const target = msgs[idx];
       const ctx: SendContext = userMsg.context ?? {mode: 'document'};
+      const items: RetryRevertItem[] = [];
+      for (let k = idx; k < msgs.length; k++) {
+        const m = msgs[k];
+        if (m.role !== 'assistant' || m.action?.kind !== 'patch') {
+          continue;
+        }
+        const count = (m.edits ?? []).filter(e => e.state === 'applied').length;
+        if (count > 0) {
+          items.push({msgId: m.id, label: m.action.explanation || 'AI edit', count});
+        }
+      }
+      return {
+        convId,
+        targetId: assistantId,
+        instruction: userMsg.text,
+        mode: ctx.mode,
+        selectionText: ctx.selectionText,
+        priorMessages: msgs.slice(0, idx - 1),
+        messages: msgs,
+        items,
+        totalEdits: items.reduce((n, it) => n + it.count, 0),
+      };
+    },
+    [active, loading],
+  );
 
-      // Before regenerating, REVERT any edits the user already accepted from this
-      // response. Otherwise the document still contains the old version, so the
-      // new attempt's SEARCH text won't match and the patch is invalid — most
-      // visibly in selection mode (retry re-sends the original selection). The
-      // accepted state is preserved as a version, so nothing is lost.
-      const applied = (target.edits ?? [])
-        .map((e, i) => ({e, i}))
-        .filter(({e}) => e.state === 'applied');
-      if (applied.length > 0) {
-        const explanation =
-          target.action?.kind === 'patch' ? target.action.explanation : 'AI edit';
-        // Undo last-applied first (safer ordering, like an undo stack). Track
-        // failures: a revert can't locate the text if the user edited it since, or
-        // if an earlier revert in this same loop shifted the region.
-        let undone = 0;
-        let failed = 0;
-        acceptingRef.current = true;
-        try {
+  /**
+   * Execute a retry plan: revert the accepted patches LIFO (latest response
+   * first — it overlays the earlier ones; within a response, latest edit first),
+   * capture ONE checkpoint for the whole revert, then regenerate the target.
+   */
+  const doRetry = useCallback(
+    async (plan: PendingRetry) => {
+      acceptingRef.current = true;
+      let undone = 0;
+      let failed = 0;
+      try {
+        for (const it of [...plan.items].reverse()) {
+          const msg = plan.messages.find(m => m.id === it.msgId);
+          if (!msg) {
+            continue;
+          }
+          const applied = (msg.edits ?? [])
+            .map((e, i) => ({e, i}))
+            .filter(({e}) => e.state === 'applied');
           for (const {e, i} of [...applied].reverse()) {
             const res = await applyTextPatch(editor, e.replace, e.search); // reverse swap
             if (res.ok) {
               undone++;
-              await setEditState(convId, assistantId, i, 'reverted');
+              await setEditState(plan.convId, it.msgId, i, 'reverted');
             } else {
               failed++;
             }
           }
-          if (undone > 0) {
-            await captureCheckpoint(editor, {
-              source: 'manual',
-              label: `Reverted before retry: ${truncate(explanation, 80)}`,
-            });
-          }
-        } finally {
-          acceptingRef.current = false;
         }
+        if (undone > 0) {
+          const targetMsg = plan.messages.find(m => m.id === plan.targetId);
+          const label =
+            targetMsg?.action?.kind === 'patch' ? targetMsg.action.explanation : 'AI edit';
+          await captureCheckpoint(editor, {
+            source: 'manual',
+            label: `Reverted ${undone} edit${undone === 1 ? '' : 's'} before retry: ${truncate(label, 60)}`,
+          });
+        }
+      } finally {
+        acceptingRef.current = false;
+      }
+
+      if (plan.totalEdits > 0) {
         if (failed === 0) {
           setNotice({
             text: `↩ Reverted ${undone} accepted edit${
               undone === 1 ? '' : 's'
-            } from the previous response so the new attempt can apply cleanly. The accepted version is still in History.`,
+            } across ${plan.items.length} response${
+              plan.items.length === 1 ? '' : 's'
+            } (newest first) so the new attempt can apply cleanly. Accepted versions stay in History.`,
             key: Date.now(),
           });
         } else if (undone > 0) {
-          // Partial revert: some edits couldn't be located, so the document still
-          // contains them. Report it honestly rather than claiming a clean slate.
           setNotice({
-            text: `↩ Reverted ${undone} of ${applied.length} edit${
-              applied.length === 1 ? '' : 's'
+            text: `↩ Reverted ${undone} of ${plan.totalEdits} edit${
+              plan.totalEdits === 1 ? '' : 's'
             }; ${failed} couldn't be located (the document changed). Retrying anyway — the new patch may not apply to those parts.`,
             key: Date.now(),
           });
         } else {
           setNotice({
-            text: "Couldn't auto-revert the previous edit(s) (the document has changed since). Retrying anyway — the new patch may not apply.",
+            text: "Couldn't auto-revert the edit(s) (the document has changed since). Retrying anyway — the new patch may not apply.",
             key: Date.now(),
           });
         }
       }
 
       startRun({
-        convId,
-        instruction: userMsg.text,
-        mode: ctx.mode,
-        selectionText: ctx.selectionText,
-        priorMessages: msgs.slice(0, idx - 1),
-        streamingId: assistantId,
+        convId: plan.convId,
+        instruction: plan.instruction,
+        mode: plan.mode,
+        selectionText: plan.selectionText,
+        priorMessages: plan.priorMessages,
+        streamingId: plan.targetId,
         replace: true,
       });
     },
-    [active, editor, loading, startRun],
+    [editor, startRun],
   );
+
+  /** Retry entry point. If any accepted edits must be reverted, ask first via the
+   *  confirm dialog (one dialog for the whole LIFO batch); otherwise just rerun. */
+  const retry = useCallback(
+    (assistantId: string) => {
+      const plan = planRetry(assistantId);
+      if (!plan) {
+        return;
+      }
+      if (plan.totalEdits > 0) {
+        setPendingRetry(plan);
+      } else {
+        void doRetry(plan);
+      }
+    },
+    [doRetry, planRetry],
+  );
+
+  const confirmRetry = useCallback(() => {
+    const plan = pendingRetry;
+    setPendingRetry(null);
+    if (plan) {
+      void doRetry(plan);
+    }
+  }, [doRetry, pendingRetry]);
+
+  const cancelRetry = useCallback(() => setPendingRetry(null), []);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -522,8 +639,6 @@ export default function ChatSidebar(): JSX.Element {
       : 'Full document';
 
   const sendDisabled = !input.trim() || loading || !active;
-  // Hide the message currently being regenerated (the live bubble stands in).
-  const visibleMessages = messages.filter(m => m.id !== streaming?.id);
 
   return (
     <>
@@ -657,6 +772,68 @@ export default function ChatSidebar(): JSX.Element {
           </div>
         )}
 
+        {pendingRetry &&
+          createPortal(
+            <div
+              className="ai-overlay"
+              role="presentation"
+              onClick={cancelRetry}>
+              <div
+                className="ai-panel retry-panel"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Confirm retry"
+                onClick={e => e.stopPropagation()}>
+                <div className="cp-header">
+                  <h3>Retry this response?</h3>
+                  <button
+                    type="button"
+                    className="cp-close"
+                    aria-label="Cancel"
+                    onClick={cancelRetry}>
+                    ✕
+                  </button>
+                </div>
+                <div className="ai-body">
+                  <p className="ai-note">
+                    Retrying will <strong>revert {pendingRetry.totalEdits} accepted edit{pendingRetry.totalEdits === 1 ? '' : 's'}</strong> across{' '}
+                    {pendingRetry.items.length} response{pendingRetry.items.length === 1 ? '' : 's'} — undone newest-first,
+                    back to this one — so the regenerated response can apply cleanly.
+                  </p>
+                  <ul className="retry-items">
+                    {pendingRetry.items.map(it => (
+                      <li key={it.msgId} className="retry-item">
+                        <span className="retry-badge">{it.count}</span>
+                        <span className="retry-label">{it.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="ai-note ai-note--muted">
+                    Accepted versions are preserved in History.
+                  </p>
+                </div>
+                <div className="ai-footer">
+                  <span />
+                  <div className="ai-footer-right">
+                    <button
+                      type="button"
+                      className="cp-button cp-button--ghost"
+                      onClick={cancelRetry}>
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="cp-button"
+                      onClick={confirmRetry}>
+                      Revert &amp; retry
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )}
+
         <div className="chat-messages" ref={scrollRef}>
           {messages.length === 0 && !streaming && (
             <div className="chat-empty">
@@ -672,23 +849,27 @@ export default function ChatSidebar(): JSX.Element {
             </div>
           )}
 
-          {visibleMessages.map(m => (
-            <MessageBubble
-              key={m.id}
-              message={m}
-              busy={loading}
-              onAcceptPatch={() => acceptPatch(m.id)}
-              onRejectEdit={i => rejectEdit(m.id, i)}
-              onRestoreEdit={i => restoreEdit(m.id, i)}
-              onAcceptEditLegacy={(i, e, label) =>
-                acceptEditLegacy(m.id, i, e.search, e.replace, label)
-              }
-              onRetry={retry}
-              onAskReply={send}
-            />
-          ))}
+          {messages.map(m => {
+            const isLive = streamingInPlace && m.id === streaming!.id;
+            return (
+              <MessageBubble
+                key={m.id}
+                message={isLive ? streaming! : m}
+                live={isLive || undefined}
+                busy={loading}
+                onAcceptPatch={() => acceptPatch(m.id)}
+                onRejectEdit={i => rejectEdit(m.id, i)}
+                onRestoreEdit={i => restoreEdit(m.id, i)}
+                onAcceptEditLegacy={(i, e, label) =>
+                  acceptEditLegacy(m.id, i, e.search, e.replace, label)
+                }
+                onRetry={retry}
+                onAskReply={send}
+              />
+            );
+          })}
 
-          {streaming && (
+          {streaming && !streamingInPlace && (
             <MessageBubble
               key={streaming.id}
               message={streaming}
@@ -842,7 +1023,9 @@ function MessageBubble({
   };
 
   return (
-    <div className={`chat-msg chat-msg--assistant${live ? ' is-live' : ''}`}>
+    <div
+      className={`chat-msg chat-msg--assistant${live ? ' is-live' : ''}`}
+      data-msg-id={message.id}>
       {showThinking && (
         <div className={`chat-thinking-pane${thinkOpen ? ' is-open' : ''}${live ? ' is-live' : ''}`}>
           <button
@@ -942,7 +1125,7 @@ function MessageBubble({
                   <span className="chat-edit-status chat-edit-status--ok">✓ Applied</span>
                 )}
                 {e.state === 'reverted' && (
-                  <span className="chat-edit-status">↩ Reverted (retrying)</span>
+                  <span className="chat-edit-status">↩ Reverted</span>
                 )}
                 {e.state === 'rejected' &&
                   (actionSealed ? (
