@@ -138,6 +138,19 @@
   color: #f0a9a9;
 }
 
+/* patch-level failure (couldn't apply: mis-copy past the retry budget, or the
+   text changed under the AI). A warning bubble, distinct from a hard error. */
+.chat-patch-failure {
+  color: #8a5a00;
+  border-color: rgba(214, 158, 46, 0.55);
+  background: rgba(255, 196, 87, 0.12);
+}
+[data-theme='dark'] .chat-patch-failure {
+  color: #f2cd8f;
+  border-color: rgba(214, 158, 46, 0.45);
+  background: rgba(214, 158, 46, 0.14);
+}
+
 /* edit card */
 .chat-edit {
   margin-top: 8px;

@@ -39,7 +39,13 @@ import {
   useConversations,
 } from './conversations';
 import Markdown from './Markdown';
-import {applyTextPatch, plainTextToBlocks} from './patch';
+import {applyTextPatch, plainTextToBlocks, textContains} from './patch';
+import {
+  classifyPatch,
+  MAX_PATCH_ATTEMPTS,
+  patchFeedback,
+  withPatchFailure,
+} from './patchValidate';
 import {selectionToSentinelText} from './sentinels';
 import {chatPanel, closePanel, openPanel, usePanelOpen, usePanelWidth} from './panelStore';
 import {
@@ -53,7 +59,8 @@ import {
 import {useActiveProjectId} from '../projects/projectStore';
 import {runAgentGraph} from './agentClient';
 import {useAgentEngine} from './agentEngine';
-import {messagesToHistory, runAgent} from './providers';
+import {docParagraphs, messagesToHistory, runAgent} from './providers';
+import type {ChatTurn} from '../rewrite/llmClient';
 import type {ChatEditState, ChatMessage, ChatMode, MessageContext} from './types';
 import {SidePanelResizer} from '../ui/SidePanelResizer';
 import {useScrollTrap} from '../ui/useScrollTrap';
@@ -275,37 +282,86 @@ export default function ChatSidebar(): JSX.Element {
       });
 
       const history = messagesToHistory(args.priorMessages);
-      const runOpts = {
+      // Snapshot of the document the AI is given for THIS run. Recorded per turn
+      // (context varies even within one conversation) so a failing patch can be
+      // classified: mis-copy (search never in the snapshot) vs stale (search was
+      // in the snapshot but the live doc changed).
+      const snapshot = docParagraphs(editor).join('\n\n');
+      const runOptsBase = {
         editor,
-        instruction: args.instruction,
         mode: args.mode,
         selectionText: args.selectionText,
-        history,
         signal: controller.signal,
         memoryEnabled,
         memories: memories.map(m => ({content: m.content})),
-        onRemember: async note => {
+        onRemember: async (note: string) => {
           if (activeProjectId) {
             await addMemory(activeProjectId, note);
           }
         },
-        onUpdate: patch =>
+        onUpdate: (patch: Partial<ChatMessage>) =>
           setStreaming(s => (s && s.id === args.streamingId ? {...s, ...patch} : s)),
       };
-      // Engine toggle: the backend LangGraph agent, or the legacy in-browser loop.
-      // Both share the RunAgentOpts contract and resolve to the same ChatMessage
-      // shape, so the .then/.catch/.finally below is identical for both.
-      const runPromise =
-        agentEngine === 'langgraph'
-          ? runAgentGraph({...runOpts, projectId: activeProjectId ?? ''})
-          : runAgent(runOpts);
-      runPromise
-        .then(msg => {
-          const final: ChatMessage = {...msg, id: args.streamingId};
+      // One engine run with a given history + instruction — used for the first
+      // attempt and each mis-copy retry. Resets the streaming bubble each time so
+      // the retry streams cleanly into the same slot.
+      const runOnce = (h: ChatTurn[], instr: string): Promise<ChatMessage> => {
+        setStreaming(s =>
+          s && s.id === args.streamingId
+            ? {...s, text: '', thinking: undefined, steps: [], action: null, edits: undefined}
+            : s,
+        );
+        const opts = {...runOptsBase, history: h, instruction: instr};
+        return agentEngine === 'langgraph'
+          ? runAgentGraph({...opts, projectId: activeProjectId ?? ''})
+          : runAgent(opts);
+      };
+
+      // Multi-layer fallback: validate the patch the AI produced; re-prompt on a
+      // mis-copy (bounded), or mark it failed if the doc changed under the AI.
+      let attempts = 0;
+      const finalize = (msg: ChatMessage): Promise<ChatMessage> => {
+        if (msg.action?.kind === 'patch' && msg.edits && msg.edits.length > 0) {
+          const issue = classifyPatch(editor, msg.edits, snapshot);
+          if (issue === 'stale') {
+            // The passage the AI was editing is gone from the live doc — the doc
+            // changed while it worked. The patch can't complete; tell the user.
+            return Promise.resolve(withPatchFailure(msg, 'stale', snapshot));
+          }
+          if (issue === 'mis-copy') {
+            if (controller.signal.aborted) {
+              return Promise.resolve(msg); // user stopped — keep the partial
+            }
+            attempts += 1;
+            if (attempts > MAX_PATCH_ATTEMPTS) {
+              return Promise.resolve(withPatchFailure(msg, 'ignored', snapshot));
+            }
+            // Re-prompt: hand the AI its failed attempt + a pointed reminder to
+            // copy the SEARCH text verbatim, then re-validate the new patch.
+            const failedText =
+              msg.text?.trim() || '(proposed a patch that did not match the document)';
+            const retryHistory: ChatTurn[] = [
+              ...history,
+              {role: 'user', content: args.instruction},
+              {role: 'assistant', content: failedText},
+            ];
+            return runOnce(retryHistory, patchFeedback(msg.edits)).then(finalize);
+          }
+        }
+        // ok (or a non-patch reply): attach the snapshot for apply-time checks.
+        return Promise.resolve(
+          msg.action?.kind === 'patch' ? {...msg, snapshot} : msg,
+        );
+      };
+
+      runOnce(history, args.instruction)
+        .then(finalize)
+        .then((finalMsg: ChatMessage) => {
+          const persisted: ChatMessage = {...finalMsg, id: args.streamingId};
           if (args.replace) {
-            void replaceMessage(args.convId, args.streamingId, final);
+            void replaceMessage(args.convId, args.streamingId, persisted);
           } else {
-            void appendMessages(args.convId, [final]);
+            void appendMessages(args.convId, [persisted]);
           }
         })
         .catch((err: unknown) => {
@@ -545,6 +601,8 @@ export default function ChatSidebar(): JSX.Element {
         const label = msg.action.explanation;
         const edits = msg.edits ?? [];
         let appliedAny = false;
+        let staleCount = 0;
+        const snapshot = msg.snapshot ?? '';
         for (let i = 0; i < edits.length; i++) {
           if (edits[i].state !== 'pending') {
             continue; // skip edits the user already rejected/resolved
@@ -558,13 +616,27 @@ export default function ChatSidebar(): JSX.Element {
             // snapshot and skip the revert.
             await setEditState(convId, msgId_, i, 'applied');
           } else {
-            await setEditState(convId, msgId_, i, 'unlocatable');
+            // A failure at accept time means the doc changed since the AI proposed
+            // this (submission already filtered mis-copies). If the search WAS in
+            // the snapshot, the original text moved/changed → "stale" (the AI's
+            // task can't be completed for this edit) — surfaced distinctly.
+            const isStale = !!snapshot && textContains(snapshot, edits[i].search);
+            await setEditState(convId, msgId_, i, isStale ? 'stale' : 'unlocatable');
+            if (isStale) {
+              staleCount++;
+            }
           }
         }
         if (appliedAny) {
           await captureCheckpoint(editor, {
             source: 'ai-accept',
             label: truncate(label, 120) || 'AI chat edit',
+          });
+        }
+        if (staleCount > 0) {
+          setNotice({
+            text: `⚠ ${staleCount} edit${staleCount === 1 ? '' : 's'} couldn't be applied — the original text changed while the AI was working (the document was edited since this was proposed), so ${staleCount === 1 ? 'that edit' : 'those edits'} can't be completed. Reject ${staleCount === 1 ? 'it' : 'them'} and re-send if you still want the change.`,
+            key: Date.now(),
           });
         }
       } finally {
@@ -995,7 +1067,11 @@ function MessageBubble({
   // unlocatable) or it was reverted for retry — before that, a rejected edit can
   // still be restored to pending.
   const actionSealed = edits.some(
-    e => e.state === 'applied' || e.state === 'unlocatable' || e.state === 'reverted',
+    e =>
+      e.state === 'applied' ||
+      e.state === 'unlocatable' ||
+      e.state === 'stale' ||
+      e.state === 'reverted',
   );
 
   if (message.role === 'user') {
@@ -1074,6 +1150,13 @@ function MessageBubble({
           <Markdown>{message.text}</Markdown>
         </div>
       )}
+      {message.patchFailure && (
+        <div className="chat-bubble chat-bubble--assistant chat-patch-failure">
+          {message.patchFailure === 'stale'
+            ? '⚠ This edit couldn’t be applied — the original text changed while the AI was working, so the task can’t be completed.'
+            : `⚠ Patch skipped — couldn’t produce a matching edit after ${MAX_PATCH_ATTEMPTS} attempts. Try rephrasing or re-send.`}
+        </div>
+      )}
       {message.error ? (
         <div className="chat-bubble chat-bubble--assistant chat-error">
           ⚠ {message.error}
@@ -1140,9 +1223,11 @@ function MessageBubble({
                       ↩ Undo reject
                     </button>
                   ))}
-                {e.state === 'unlocatable' && (
+                {(e.state === 'unlocatable' || e.state === 'stale') && (
                   <span className="chat-edit-status chat-edit-status--err">
-                    ⚠ Couldn’t locate this passage (it may have changed)
+                    {e.state === 'stale'
+                      ? '⚠ The original text changed while the AI was working — can’t apply'
+                      : '⚠ Couldn’t locate this passage (it may have changed)'}
                   </span>
                 )}
               </div>

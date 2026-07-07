@@ -31,7 +31,8 @@ export type ChatEditState =
   | 'pending'
   | 'applied'
   | 'rejected'
-  | 'unlocatable'
+  | 'unlocatable' // search text couldn't be located (generic)
+  | 'stale' // the passage existed when the AI proposed it but the doc changed since
   | 'reverted';
 
 export interface ChatResponse {
@@ -95,4 +96,13 @@ export interface ChatMessage {
   error?: string;
   /** Assistant only: true while this turn is still streaming (UI hint). */
   streaming?: boolean;
+  /** Assistant patch only: the document text the AI was given for this run
+   *  (sentinel-laden). Used to classify a failing edit as a mis-copy (search
+   *  never in the snapshot) vs a stale doc (search was in the snapshot but the
+   *  live doc changed). Per-turn because context varies even within a chat. */
+  snapshot?: string;
+  /** Assistant patch only: a patch-level failure that supersedes the patch card.
+   *  'ignored' = mis-copied past the retry budget (dropped); 'stale' = the
+   *  underlying text changed while the AI worked (can't complete). */
+  patchFailure?: 'ignored' | 'stale';
 }
