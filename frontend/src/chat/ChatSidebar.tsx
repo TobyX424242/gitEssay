@@ -10,6 +10,7 @@
  */
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {$getRoot, $getSelection, $isRangeSelection} from 'lexical';
+import {createPortal} from 'react-dom';
 import {
   type JSX,
   useCallback,
@@ -38,7 +39,13 @@ import {
   useConversations,
 } from './conversations';
 import Markdown from './Markdown';
-import {applyTextPatch, plainTextToBlocks} from './patch';
+import {applyTextPatch, plainTextToBlocks, textContains} from './patch';
+import {
+  classifyPatch,
+  MAX_PATCH_ATTEMPTS,
+  patchFeedback,
+  withPatchFailure,
+} from './patchValidate';
 import {selectionToSentinelText} from './sentinels';
 import {chatPanel, closePanel, openPanel, usePanelOpen, usePanelWidth} from './panelStore';
 import {
@@ -52,7 +59,8 @@ import {
 import {useActiveProjectId} from '../projects/projectStore';
 import {runAgentGraph} from './agentClient';
 import {useAgentEngine} from './agentEngine';
-import {messagesToHistory, runAgent} from './providers';
+import {docParagraphs, messagesToHistory, runAgent} from './providers';
+import type {ChatTurn} from '../rewrite/llmClient';
 import type {ChatEditState, ChatMessage, ChatMode, MessageContext} from './types';
 import {SidePanelResizer} from '../ui/SidePanelResizer';
 import {useScrollTrap} from '../ui/useScrollTrap';
@@ -81,6 +89,29 @@ function truncate(s: string, n: number): string {
 /** Context captured at send time and stored on the user message (drives Retry). */
 type SendContext = MessageContext;
 
+/** One response whose accepted edits will be reverted before a retry. */
+interface RetryRevertItem {
+  msgId: string;
+  /** Patch explanation (the version label) — shown in the confirm dialog. */
+  label: string;
+  count: number;
+}
+
+/** A planned retry: revert a LIFO batch of accepted patches, then regenerate. */
+interface PendingRetry {
+  convId: string;
+  targetId: string;
+  instruction: string;
+  mode: ChatMode;
+  selectionText?: string;
+  priorMessages: ChatMessage[];
+  /** Snapshot at click time — edits still carry the 'applied' state to revert. */
+  messages: ChatMessage[];
+  /** Chronological (target → latest); doRetry reverses this for LIFO undo. */
+  items: RetryRevertItem[];
+  totalEdits: number;
+}
+
 export default function ChatSidebar(): JSX.Element {
   const [editor] = useLexicalComposerContext();
   const open = usePanelOpen();
@@ -98,6 +129,7 @@ export default function ChatSidebar(): JSX.Element {
   const [streaming, setStreaming] = useState<ChatMessage | null>(null);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<{text: string; key: number} | null>(null);
+  const [pendingRetry, setPendingRetry] = useState<PendingRetry | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
   const [showList, setShowList] = useState(false);
@@ -106,6 +138,10 @@ export default function ChatSidebar(): JSX.Element {
   );
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // The message id kept in view during/after a retry (its target), so the live
+  // stream and the finalized patch card don't get scrolled off to the bottom.
+  // Set on a retry, cleared on a fresh send or a conversation switch.
+  const pinnedIdRef = useRef<string | null>(null);
   const trapRef = useScrollTrap();
   const abortRef = useRef<AbortController | null>(null);
   // Re-entrancy guard for the accept/revert paths. Applying edits + persisting
@@ -151,12 +187,33 @@ export default function ChatSidebar(): JSX.Element {
     return editor.registerUpdateListener(probe);
   }, [editor]);
 
-  // Autoscroll to the latest content (persisted messages + the live stream).
+  // A retry streams INTO an existing message's slot, so the live Thoughts pane and
+  // patch card stay at the original position (not the conversation bottom). A
+  // fresh send has a brand-new id and renders at the end as usual.
+  const streamingInPlace = !!streaming && messages.some(m => m.id === streaming.id);
+
+  // Clear the pin when switching conversations so a stale target doesn't pin.
+  useEffect(() => {
+    pinnedIdRef.current = null;
+  }, [active?.id]);
+
+  // Keep the newest content in view. A fresh send scrolls to the bottom; a retry
+  // pins its target so the live stream AND the finalized patch card stay visible
+  // at the original slot — not jumping to the bottom when the patch lands.
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
+    if (!el) {
+      return;
     }
+    const pin = pinnedIdRef.current;
+    if (pin) {
+      const node = el.querySelector(`[data-msg-id="${CSS.escape(pin)}"]`);
+      if (node instanceof HTMLElement) {
+        node.scrollIntoView({block: 'nearest'});
+        return;
+      }
+    }
+    el.scrollTop = el.scrollHeight;
   }, [messages, streaming, loading]);
 
   // Auto-dismiss the transient notice banner.
@@ -210,6 +267,9 @@ export default function ChatSidebar(): JSX.Element {
       }
       const controller = new AbortController();
       abortRef.current = controller;
+      // Pin a retry's target into view (live stream + finalized patch card); a
+      // fresh send has no pin, so it scrolls to the bottom as usual.
+      pinnedIdRef.current = args.replace ? args.streamingId : null;
       setLoading(true);
       setStreaming({
         id: args.streamingId,
@@ -222,37 +282,86 @@ export default function ChatSidebar(): JSX.Element {
       });
 
       const history = messagesToHistory(args.priorMessages);
-      const runOpts = {
+      // Snapshot of the document the AI is given for THIS run. Recorded per turn
+      // (context varies even within one conversation) so a failing patch can be
+      // classified: mis-copy (search never in the snapshot) vs stale (search was
+      // in the snapshot but the live doc changed).
+      const snapshot = docParagraphs(editor).join('\n\n');
+      const runOptsBase = {
         editor,
-        instruction: args.instruction,
         mode: args.mode,
         selectionText: args.selectionText,
-        history,
         signal: controller.signal,
         memoryEnabled,
         memories: memories.map(m => ({content: m.content})),
-        onRemember: async note => {
+        onRemember: async (note: string) => {
           if (activeProjectId) {
             await addMemory(activeProjectId, note);
           }
         },
-        onUpdate: patch =>
+        onUpdate: (patch: Partial<ChatMessage>) =>
           setStreaming(s => (s && s.id === args.streamingId ? {...s, ...patch} : s)),
       };
-      // Engine toggle: the backend LangGraph agent, or the legacy in-browser loop.
-      // Both share the RunAgentOpts contract and resolve to the same ChatMessage
-      // shape, so the .then/.catch/.finally below is identical for both.
-      const runPromise =
-        agentEngine === 'langgraph'
-          ? runAgentGraph({...runOpts, projectId: activeProjectId ?? ''})
-          : runAgent(runOpts);
-      runPromise
-        .then(msg => {
-          const final: ChatMessage = {...msg, id: args.streamingId};
+      // One engine run with a given history + instruction — used for the first
+      // attempt and each mis-copy retry. Resets the streaming bubble each time so
+      // the retry streams cleanly into the same slot.
+      const runOnce = (h: ChatTurn[], instr: string): Promise<ChatMessage> => {
+        setStreaming(s =>
+          s && s.id === args.streamingId
+            ? {...s, text: '', thinking: undefined, steps: [], action: null, edits: undefined}
+            : s,
+        );
+        const opts = {...runOptsBase, history: h, instruction: instr};
+        return agentEngine === 'langgraph'
+          ? runAgentGraph({...opts, projectId: activeProjectId ?? ''})
+          : runAgent(opts);
+      };
+
+      // Multi-layer fallback: validate the patch the AI produced; re-prompt on a
+      // mis-copy (bounded), or mark it failed if the doc changed under the AI.
+      let attempts = 0;
+      const finalize = (msg: ChatMessage): Promise<ChatMessage> => {
+        if (msg.action?.kind === 'patch' && msg.edits && msg.edits.length > 0) {
+          const issue = classifyPatch(editor, msg.edits, snapshot);
+          if (issue === 'stale') {
+            // The passage the AI was editing is gone from the live doc — the doc
+            // changed while it worked. The patch can't complete; tell the user.
+            return Promise.resolve(withPatchFailure(msg, 'stale', snapshot));
+          }
+          if (issue === 'mis-copy') {
+            if (controller.signal.aborted) {
+              return Promise.resolve(msg); // user stopped — keep the partial
+            }
+            attempts += 1;
+            if (attempts > MAX_PATCH_ATTEMPTS) {
+              return Promise.resolve(withPatchFailure(msg, 'ignored', snapshot));
+            }
+            // Re-prompt: hand the AI its failed attempt + a pointed reminder to
+            // copy the SEARCH text verbatim, then re-validate the new patch.
+            const failedText =
+              msg.text?.trim() || '(proposed a patch that did not match the document)';
+            const retryHistory: ChatTurn[] = [
+              ...history,
+              {role: 'user', content: args.instruction},
+              {role: 'assistant', content: failedText},
+            ];
+            return runOnce(retryHistory, patchFeedback(msg.edits)).then(finalize);
+          }
+        }
+        // ok (or a non-patch reply): attach the snapshot for apply-time checks.
+        return Promise.resolve(
+          msg.action?.kind === 'patch' ? {...msg, snapshot} : msg,
+        );
+      };
+
+      runOnce(history, args.instruction)
+        .then(finalize)
+        .then((finalMsg: ChatMessage) => {
+          const persisted: ChatMessage = {...finalMsg, id: args.streamingId};
           if (args.replace) {
-            void replaceMessage(args.convId, args.streamingId, final);
+            void replaceMessage(args.convId, args.streamingId, persisted);
           } else {
-            void appendMessages(args.convId, [final]);
+            void appendMessages(args.convId, [persisted]);
           }
         })
         .catch((err: unknown) => {
@@ -312,96 +421,160 @@ export default function ChatSidebar(): JSX.Element {
     [active, captureSelection, input, loading, startRun],
   );
 
-  const retry = useCallback(
-    async (assistantId: string) => {
+  /**
+   * Build the retry plan: every applied patch from the target (inclusive) onward
+   * must be reverted so the document rolls back to its state just before this
+   * turn — otherwise a later patch's text still overlays the region and the new
+   * attempt's SEARCH won't match. Returns null if the target isn't retryable.
+   */
+  const planRetry = useCallback(
+    (assistantId: string): PendingRetry | null => {
       if (!active || loading || acceptingRef.current) {
-        return;
+        return null;
       }
       const convId = active.id;
       const msgs = active.messages;
       const idx = msgs.findIndex(m => m.id === assistantId);
       if (idx < 1) {
-        return;
+        return null;
       }
       const userMsg = msgs[idx - 1];
       if (userMsg.role !== 'user') {
-        return;
+        return null;
       }
-      const target = msgs[idx];
       const ctx: SendContext = userMsg.context ?? {mode: 'document'};
+      const items: RetryRevertItem[] = [];
+      for (let k = idx; k < msgs.length; k++) {
+        const m = msgs[k];
+        if (m.role !== 'assistant' || m.action?.kind !== 'patch') {
+          continue;
+        }
+        const count = (m.edits ?? []).filter(e => e.state === 'applied').length;
+        if (count > 0) {
+          items.push({msgId: m.id, label: m.action.explanation || 'AI edit', count});
+        }
+      }
+      return {
+        convId,
+        targetId: assistantId,
+        instruction: userMsg.text,
+        mode: ctx.mode,
+        selectionText: ctx.selectionText,
+        priorMessages: msgs.slice(0, idx - 1),
+        messages: msgs,
+        items,
+        totalEdits: items.reduce((n, it) => n + it.count, 0),
+      };
+    },
+    [active, loading],
+  );
 
-      // Before regenerating, REVERT any edits the user already accepted from this
-      // response. Otherwise the document still contains the old version, so the
-      // new attempt's SEARCH text won't match and the patch is invalid — most
-      // visibly in selection mode (retry re-sends the original selection). The
-      // accepted state is preserved as a version, so nothing is lost.
-      const applied = (target.edits ?? [])
-        .map((e, i) => ({e, i}))
-        .filter(({e}) => e.state === 'applied');
-      if (applied.length > 0) {
-        const explanation =
-          target.action?.kind === 'patch' ? target.action.explanation : 'AI edit';
-        // Undo last-applied first (safer ordering, like an undo stack). Track
-        // failures: a revert can't locate the text if the user edited it since, or
-        // if an earlier revert in this same loop shifted the region.
-        let undone = 0;
-        let failed = 0;
-        acceptingRef.current = true;
-        try {
+  /**
+   * Execute a retry plan: revert the accepted patches LIFO (latest response
+   * first — it overlays the earlier ones; within a response, latest edit first),
+   * capture ONE checkpoint for the whole revert, then regenerate the target.
+   */
+  const doRetry = useCallback(
+    async (plan: PendingRetry) => {
+      acceptingRef.current = true;
+      let undone = 0;
+      let failed = 0;
+      try {
+        for (const it of [...plan.items].reverse()) {
+          const msg = plan.messages.find(m => m.id === it.msgId);
+          if (!msg) {
+            continue;
+          }
+          const applied = (msg.edits ?? [])
+            .map((e, i) => ({e, i}))
+            .filter(({e}) => e.state === 'applied');
           for (const {e, i} of [...applied].reverse()) {
             const res = await applyTextPatch(editor, e.replace, e.search); // reverse swap
             if (res.ok) {
               undone++;
-              await setEditState(convId, assistantId, i, 'reverted');
+              await setEditState(plan.convId, it.msgId, i, 'reverted');
             } else {
               failed++;
             }
           }
-          if (undone > 0) {
-            await captureCheckpoint(editor, {
-              source: 'manual',
-              label: `Reverted before retry: ${truncate(explanation, 80)}`,
-            });
-          }
-        } finally {
-          acceptingRef.current = false;
         }
+        if (undone > 0) {
+          const targetMsg = plan.messages.find(m => m.id === plan.targetId);
+          const label =
+            targetMsg?.action?.kind === 'patch' ? targetMsg.action.explanation : 'AI edit';
+          await captureCheckpoint(editor, {
+            source: 'manual',
+            label: `Reverted ${undone} edit${undone === 1 ? '' : 's'} before retry: ${truncate(label, 60)}`,
+          });
+        }
+      } finally {
+        acceptingRef.current = false;
+      }
+
+      if (plan.totalEdits > 0) {
         if (failed === 0) {
           setNotice({
             text: `↩ Reverted ${undone} accepted edit${
               undone === 1 ? '' : 's'
-            } from the previous response so the new attempt can apply cleanly. The accepted version is still in History.`,
+            } across ${plan.items.length} response${
+              plan.items.length === 1 ? '' : 's'
+            } (newest first) so the new attempt can apply cleanly. Accepted versions stay in History.`,
             key: Date.now(),
           });
         } else if (undone > 0) {
-          // Partial revert: some edits couldn't be located, so the document still
-          // contains them. Report it honestly rather than claiming a clean slate.
           setNotice({
-            text: `↩ Reverted ${undone} of ${applied.length} edit${
-              applied.length === 1 ? '' : 's'
+            text: `↩ Reverted ${undone} of ${plan.totalEdits} edit${
+              plan.totalEdits === 1 ? '' : 's'
             }; ${failed} couldn't be located (the document changed). Retrying anyway — the new patch may not apply to those parts.`,
             key: Date.now(),
           });
         } else {
           setNotice({
-            text: "Couldn't auto-revert the previous edit(s) (the document has changed since). Retrying anyway — the new patch may not apply.",
+            text: "Couldn't auto-revert the edit(s) (the document has changed since). Retrying anyway — the new patch may not apply.",
             key: Date.now(),
           });
         }
       }
 
       startRun({
-        convId,
-        instruction: userMsg.text,
-        mode: ctx.mode,
-        selectionText: ctx.selectionText,
-        priorMessages: msgs.slice(0, idx - 1),
-        streamingId: assistantId,
+        convId: plan.convId,
+        instruction: plan.instruction,
+        mode: plan.mode,
+        selectionText: plan.selectionText,
+        priorMessages: plan.priorMessages,
+        streamingId: plan.targetId,
         replace: true,
       });
     },
-    [active, editor, loading, startRun],
+    [editor, startRun],
   );
+
+  /** Retry entry point. If any accepted edits must be reverted, ask first via the
+   *  confirm dialog (one dialog for the whole LIFO batch); otherwise just rerun. */
+  const retry = useCallback(
+    (assistantId: string) => {
+      const plan = planRetry(assistantId);
+      if (!plan) {
+        return;
+      }
+      if (plan.totalEdits > 0) {
+        setPendingRetry(plan);
+      } else {
+        void doRetry(plan);
+      }
+    },
+    [doRetry, planRetry],
+  );
+
+  const confirmRetry = useCallback(() => {
+    const plan = pendingRetry;
+    setPendingRetry(null);
+    if (plan) {
+      void doRetry(plan);
+    }
+  }, [doRetry, pendingRetry]);
+
+  const cancelRetry = useCallback(() => setPendingRetry(null), []);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -428,6 +601,8 @@ export default function ChatSidebar(): JSX.Element {
         const label = msg.action.explanation;
         const edits = msg.edits ?? [];
         let appliedAny = false;
+        let staleCount = 0;
+        const snapshot = msg.snapshot ?? '';
         for (let i = 0; i < edits.length; i++) {
           if (edits[i].state !== 'pending') {
             continue; // skip edits the user already rejected/resolved
@@ -441,13 +616,27 @@ export default function ChatSidebar(): JSX.Element {
             // snapshot and skip the revert.
             await setEditState(convId, msgId_, i, 'applied');
           } else {
-            await setEditState(convId, msgId_, i, 'unlocatable');
+            // A failure at accept time means the doc changed since the AI proposed
+            // this (submission already filtered mis-copies). If the search WAS in
+            // the snapshot, the original text moved/changed → "stale" (the AI's
+            // task can't be completed for this edit) — surfaced distinctly.
+            const isStale = !!snapshot && textContains(snapshot, edits[i].search);
+            await setEditState(convId, msgId_, i, isStale ? 'stale' : 'unlocatable');
+            if (isStale) {
+              staleCount++;
+            }
           }
         }
         if (appliedAny) {
           await captureCheckpoint(editor, {
             source: 'ai-accept',
             label: truncate(label, 120) || 'AI chat edit',
+          });
+        }
+        if (staleCount > 0) {
+          setNotice({
+            text: `⚠ ${staleCount} edit${staleCount === 1 ? '' : 's'} couldn't be applied — the original text changed while the AI was working (the document was edited since this was proposed), so ${staleCount === 1 ? 'that edit' : 'those edits'} can't be completed. Reject ${staleCount === 1 ? 'it' : 'them'} and re-send if you still want the change.`,
+            key: Date.now(),
           });
         }
       } finally {
@@ -522,8 +711,6 @@ export default function ChatSidebar(): JSX.Element {
       : 'Full document';
 
   const sendDisabled = !input.trim() || loading || !active;
-  // Hide the message currently being regenerated (the live bubble stands in).
-  const visibleMessages = messages.filter(m => m.id !== streaming?.id);
 
   return (
     <>
@@ -657,6 +844,68 @@ export default function ChatSidebar(): JSX.Element {
           </div>
         )}
 
+        {pendingRetry &&
+          createPortal(
+            <div
+              className="ai-overlay"
+              role="presentation"
+              onClick={cancelRetry}>
+              <div
+                className="ai-panel retry-panel"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Confirm retry"
+                onClick={e => e.stopPropagation()}>
+                <div className="cp-header">
+                  <h3>Retry this response?</h3>
+                  <button
+                    type="button"
+                    className="cp-close"
+                    aria-label="Cancel"
+                    onClick={cancelRetry}>
+                    ✕
+                  </button>
+                </div>
+                <div className="ai-body">
+                  <p className="ai-note">
+                    Retrying will <strong>revert {pendingRetry.totalEdits} accepted edit{pendingRetry.totalEdits === 1 ? '' : 's'}</strong> across{' '}
+                    {pendingRetry.items.length} response{pendingRetry.items.length === 1 ? '' : 's'} — undone newest-first,
+                    back to this one — so the regenerated response can apply cleanly.
+                  </p>
+                  <ul className="retry-items">
+                    {pendingRetry.items.map(it => (
+                      <li key={it.msgId} className="retry-item">
+                        <span className="retry-badge">{it.count}</span>
+                        <span className="retry-label">{it.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="ai-note ai-note--muted">
+                    Accepted versions are preserved in History.
+                  </p>
+                </div>
+                <div className="ai-footer">
+                  <span />
+                  <div className="ai-footer-right">
+                    <button
+                      type="button"
+                      className="cp-button cp-button--ghost"
+                      onClick={cancelRetry}>
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="cp-button"
+                      onClick={confirmRetry}>
+                      Revert &amp; retry
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )}
+
         <div className="chat-messages" ref={scrollRef}>
           {messages.length === 0 && !streaming && (
             <div className="chat-empty">
@@ -672,23 +921,27 @@ export default function ChatSidebar(): JSX.Element {
             </div>
           )}
 
-          {visibleMessages.map(m => (
-            <MessageBubble
-              key={m.id}
-              message={m}
-              busy={loading}
-              onAcceptPatch={() => acceptPatch(m.id)}
-              onRejectEdit={i => rejectEdit(m.id, i)}
-              onRestoreEdit={i => restoreEdit(m.id, i)}
-              onAcceptEditLegacy={(i, e, label) =>
-                acceptEditLegacy(m.id, i, e.search, e.replace, label)
-              }
-              onRetry={retry}
-              onAskReply={send}
-            />
-          ))}
+          {messages.map(m => {
+            const isLive = streamingInPlace && m.id === streaming!.id;
+            return (
+              <MessageBubble
+                key={m.id}
+                message={isLive ? streaming! : m}
+                live={isLive || undefined}
+                busy={loading}
+                onAcceptPatch={() => acceptPatch(m.id)}
+                onRejectEdit={i => rejectEdit(m.id, i)}
+                onRestoreEdit={i => restoreEdit(m.id, i)}
+                onAcceptEditLegacy={(i, e, label) =>
+                  acceptEditLegacy(m.id, i, e.search, e.replace, label)
+                }
+                onRetry={retry}
+                onAskReply={send}
+              />
+            );
+          })}
 
-          {streaming && (
+          {streaming && !streamingInPlace && (
             <MessageBubble
               key={streaming.id}
               message={streaming}
@@ -814,7 +1067,11 @@ function MessageBubble({
   // unlocatable) or it was reverted for retry — before that, a rejected edit can
   // still be restored to pending.
   const actionSealed = edits.some(
-    e => e.state === 'applied' || e.state === 'unlocatable' || e.state === 'reverted',
+    e =>
+      e.state === 'applied' ||
+      e.state === 'unlocatable' ||
+      e.state === 'stale' ||
+      e.state === 'reverted',
   );
 
   if (message.role === 'user') {
@@ -842,7 +1099,9 @@ function MessageBubble({
   };
 
   return (
-    <div className={`chat-msg chat-msg--assistant${live ? ' is-live' : ''}`}>
+    <div
+      className={`chat-msg chat-msg--assistant${live ? ' is-live' : ''}`}
+      data-msg-id={message.id}>
       {showThinking && (
         <div className={`chat-thinking-pane${thinkOpen ? ' is-open' : ''}${live ? ' is-live' : ''}`}>
           <button
@@ -889,6 +1148,13 @@ function MessageBubble({
       {message.text && (
         <div className="chat-bubble chat-bubble--assistant">
           <Markdown>{message.text}</Markdown>
+        </div>
+      )}
+      {message.patchFailure && (
+        <div className="chat-bubble chat-bubble--assistant chat-patch-failure">
+          {message.patchFailure === 'stale'
+            ? '⚠ This edit couldn’t be applied — the original text changed while the AI was working, so the task can’t be completed.'
+            : `⚠ Patch skipped — couldn’t produce a matching edit after ${MAX_PATCH_ATTEMPTS} attempts. Try rephrasing or re-send.`}
         </div>
       )}
       {message.error ? (
@@ -942,7 +1208,7 @@ function MessageBubble({
                   <span className="chat-edit-status chat-edit-status--ok">✓ Applied</span>
                 )}
                 {e.state === 'reverted' && (
-                  <span className="chat-edit-status">↩ Reverted (retrying)</span>
+                  <span className="chat-edit-status">↩ Reverted</span>
                 )}
                 {e.state === 'rejected' &&
                   (actionSealed ? (
@@ -957,9 +1223,11 @@ function MessageBubble({
                       ↩ Undo reject
                     </button>
                   ))}
-                {e.state === 'unlocatable' && (
+                {(e.state === 'unlocatable' || e.state === 'stale') && (
                   <span className="chat-edit-status chat-edit-status--err">
-                    ⚠ Couldn’t locate this passage (it may have changed)
+                    {e.state === 'stale'
+                      ? '⚠ The original text changed while the AI was working — can’t apply'
+                      : '⚠ Couldn’t locate this passage (it may have changed)'}
                   </span>
                 )}
               </div>
