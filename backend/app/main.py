@@ -9,9 +9,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import Base, SessionLocal, engine
+from app.literature_search import ensure_fts_table
 from app.models import EMPTY_STATE, AISettings, Checkpoint, Project, new_id, now_ms
 from app.routers import ai as ai_router
-from app.routers import checkpoints, conversations, memories, projects
+from app.routers import checkpoints, conversations, literature, memories, projects
 
 
 def _seed() -> None:
@@ -50,7 +51,36 @@ def _seed() -> None:
         db.close()
 
 
+def _migrate() -> None:
+    """create_all only creates NEW tables; existing DBs need their new columns
+    added by hand. SQLite supports ADD COLUMN with a constant default — check
+    PRAGMA table_info and add what's missing."""
+    wanted = {
+        "memories": {"literature_id": "VARCHAR"},
+        "ai_settings": {
+            "vision_capable": "BOOLEAN NOT NULL DEFAULT 0",
+            "embedding_model": "VARCHAR NOT NULL DEFAULT ''",
+        },
+        "literature": {
+            "summary": "TEXT",
+            "summary_status": "VARCHAR NOT NULL DEFAULT 'none'",
+            "progress": "REAL",
+        },
+    }
+    with engine.connect() as conn:
+        for table, cols in wanted.items():
+            existing = {
+                row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})").all()
+            }
+            for col, ddl in cols.items():
+                if col not in existing:
+                    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+        conn.commit()
+
+
 Base.metadata.create_all(bind=engine)
+_migrate()
+ensure_fts_table()
 _seed()
 
 app = FastAPI(title="gitEssay backend")
@@ -74,6 +104,7 @@ app.include_router(projects.router, prefix="/api")
 app.include_router(checkpoints.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
 app.include_router(memories.router, prefix="/api")
+app.include_router(literature.router, prefix="/api")
 app.include_router(ai_router.router, prefix="/api")
 
 

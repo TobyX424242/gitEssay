@@ -13,12 +13,33 @@ dependencies = [
     "langchain>=1.3.11",
     "langchain-openai>=1.3.3",
     "langchain-anthropic>=1.4.8",
+    "docling>=2.113.0",
+    # Direct pins so the pytorch-cpu index source below actually applies (uv
+    # only honours [tool.uv.sources] for packages the project names directly).
+    "torch>=2.13",
+    "torchvision>=0.28",
+    "python-multipart>=0.0.32",
+    "numpy>=2.2.6",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "reportlab>=5.0.0",
 ]
+
+# CPU-only PyTorch wheels: the PyPI `torch` wheel drags in ~3 GB of CUDA
+# runtime packages (nvidia-*, triton) that are dead weight in a CPU container.
+# docling runs fine on CPU torch (~1–5 s/page). If you want local GPU parsing,
+# remove this block and re-lock.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = {index = "pytorch-cpu"}
+torchvision = {index = "pytorch-cpu"}
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

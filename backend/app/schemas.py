@@ -85,10 +85,12 @@ class EditStatePatch(BaseModel):
     state: Literal["pending", "applied", "rejected", "unlocatable", "stale", "reverted"]
 
 
-# ---- memories (AI long-term, project-scoped notes) ------------------------
+# ---- memories (AI long-term, project/literature-scoped notes) -------------
 class MemoryOut(BaseModel):
     id: str
     project_id: str
+    literature_id: Optional[str] = None
+    literature_title: Optional[str] = None  # joined, for display
     content: str
     created_at: int
 
@@ -97,6 +99,45 @@ class MemoryOut(BaseModel):
 
 class MemoryCreate(BaseModel):
     content: str
+    literature_id: Optional[str] = None  # NULL = project-wide note
+
+
+# ---- literature (uploaded references: PDF/DOCX → chunks/images) -----------
+class LiteratureOut(BaseModel):
+    id: str
+    project_id: str
+    filename: str
+    title: str
+    status: str  # processing | ready | error
+    error: Optional[str] = None
+    page_count: int
+    char_count: int
+    chunk_count: int
+    image_count: int
+    note_count: int = 0
+    # AI summary lifecycle: none → generating → ready | failed | skipped
+    summary_status: str = "none"
+    # Parse progress 0..1 while processing (PDFs); null = indeterminate
+    progress: Optional[float] = None
+    created_at: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LiteratureImageOut(BaseModel):
+    id: str
+    seq: int
+    caption: str
+    width: int
+    height: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LiteratureDetail(LiteratureOut):
+    images: list[LiteratureImageOut] = []
+    outline: list[str] = []  # distinct chunk headings, in document order
+    summary: Optional[str] = None
 
 
 # ---- AI -------------------------------------------------------------------
@@ -124,6 +165,8 @@ class AISettingsOut(BaseModel):
     temperature: float
     max_input_tokens: int
     max_output_tokens: int
+    vision_capable: bool
+    embedding_model: str
     has_key: bool
     api_key: str = ""  # masked — empty unless a key is set
 
@@ -138,6 +181,9 @@ class AISettingsIn(BaseModel):
     temperature: Optional[float] = None
     max_input_tokens: Optional[int] = None
     max_output_tokens: Optional[int] = None
+    # User-declared model capability flags.
+    vision_capable: Optional[bool] = None
+    embedding_model: Optional[str] = None
 
 
 class TestResult(BaseModel):

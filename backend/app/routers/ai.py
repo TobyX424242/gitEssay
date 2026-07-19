@@ -30,6 +30,8 @@ def _mask(s: AISettings) -> dict:
         "temperature": s.temperature,
         "max_input_tokens": s.max_input_tokens,
         "max_output_tokens": s.max_output_tokens,
+        "vision_capable": bool(s.vision_capable),
+        "embedding_model": s.embedding_model or "",
         "has_key": bool(s.api_key),
         "api_key": "",  # never return the real key to the browser
     }
@@ -58,7 +60,8 @@ def test_connection(body: schemas.AISettingsIn, db: Session = Depends(get_db)):
     # Build a transient settings object with the overrides applied.
     merged = type("S", (), {})()
     for attr in ("provider_format", "base_url", "api_key", "model",
-                 "temperature", "max_input_tokens", "max_output_tokens"):
+                 "temperature", "max_input_tokens", "max_output_tokens",
+                 "vision_capable", "embedding_model"):
         setattr(merged, attr, overrides.get(attr, getattr(s, attr)))
     # Reasoning/thinking models spend tokens on thinking BEFORE any visible text,
     # so give the probe enough room to finish and emit a reply. 32 was too tight

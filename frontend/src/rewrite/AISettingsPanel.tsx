@@ -168,6 +168,20 @@ export default function AISettingsPanel({
             />
           </label>
 
+          <label className="ai-field ai-field--check">
+            <input
+              type="checkbox"
+              checked={draft.visionCapable}
+              onChange={e => set('visionCapable', e.target.checked)}
+            />
+            <span className="ai-label">
+              Model can see images (vision)
+              <span className="ai-hint">
+                let the agent look at figures extracted from literature
+              </span>
+            </span>
+          </label>
+
           <label className="ai-field">
             <span className="ai-label">
               Agent engine <span className="ai-hint">experimental</span>
@@ -197,6 +211,25 @@ export default function AISettingsPanel({
 
           {showAdvanced && (
             <div className="ai-advanced">
+              <label className="ai-field">
+                <span className="ai-label">
+                  Embedding model
+                  <span className="ai-hint">optional — semantic literature search</span>
+                </span>
+                <input
+                  className="cp-input"
+                  value={draft.embeddingModel}
+                  onChange={e => set('embeddingModel', e.target.value)}
+                  placeholder="e.g. text-embedding-3-small (blank = keyword-only)"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+              </label>
+              <p className="ai-note ai-note--muted">
+                Served from the same base URL via the OpenAI-compatible
+                /embeddings endpoint (OpenAI-format providers only). New uploads
+                are embedded automatically; leave blank for keyword-only search.
+              </p>
               <label className="ai-field">
                 <span className="ai-label">
                   Temperature <span className="ai-hint">({draft.temperature})</span>

@@ -8,10 +8,13 @@
 const BASE = '/api';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // FormData bodies must NOT carry a manual Content-Type — the browser sets
+  // multipart/form-data with its boundary.
+  const isForm = init?.body instanceof FormData;
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isForm ? {} : {'Content-Type': 'application/json'}),
       ...(init?.headers ?? {}),
     },
   });
@@ -38,6 +41,9 @@ export const api = {
       method: 'POST',
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
+  /** Multipart upload (file attachments) — the browser sets the boundary. */
+  postForm: <T>(path: string, form: FormData) =>
+    request<T>(path, {method: 'POST', body: form}),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, {
       method: 'PUT',

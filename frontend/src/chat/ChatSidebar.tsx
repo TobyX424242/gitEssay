@@ -64,7 +64,13 @@ import {docParagraphs, messagesToHistory, runAgent} from './providers';
 import {buildRetryPlan, lifoRevertSteps} from './retry';
 import type {RetryPlan} from './retry';
 import type {ChatTurn} from '../rewrite/llmClient';
-import type {ChatEditState, ChatMessage, ChatMode, MessageContext} from './types';
+import type {
+  AgentStep,
+  ChatEditState,
+  ChatMessage,
+  ChatMode,
+  MessageContext,
+} from './types';
 import {SidePanelResizer} from '../ui/SidePanelResizer';
 import {useScrollTrap} from '../ui/useScrollTrap';
 import './chat.css';
@@ -87,6 +93,73 @@ function deriveTitle(text: string): string {
 function truncate(s: string, n: number): string {
   const t = s.trim();
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+}
+
+/** Step-chip icon per AgentStep kind (LangGraph agent tool activity). */
+const STEP_ICON: Record<string, string> = {
+  read: '📖',
+  search: '🔍',
+  literature_list: '📚',
+  literature_search: '📚',
+  literature_read: '📄',
+  figure: '🖼',
+  notes: '🗒',
+  delegate: '🤖',
+};
+
+/** Group memory notes for the Memory panel: project-wide first, then one
+ *  section per literature item (per-paper notes the agent saved). */
+function groupMemories(
+  memories: Memory[],
+): Array<{key: string; title: string | null; notes: Memory[]}> {
+  const project = memories.filter(m => !m.literature_id);
+  const byLit = new Map<string, {title: string; notes: Memory[]}>();
+  for (const m of memories) {
+    if (!m.literature_id) {
+      continue;
+    }
+    const g = byLit.get(m.literature_id) ?? {
+      title: m.literature_title ?? 'Literature',
+      notes: [],
+    };
+    g.notes.push(m);
+    byLit.set(m.literature_id, g);
+  }
+  const groups: Array<{key: string; title: string | null; notes: Memory[]}> = [];
+  if (project.length > 0) {
+    groups.push({key: '__project__', title: null, notes: project});
+  }
+  for (const [lid, g] of byLit) {
+    groups.push({key: lid, title: g.title, notes: g.notes});
+  }
+  return groups;
+}
+
+/** Step-chip label per AgentStep kind. */
+function stepLabel(s: AgentStep): string {
+  switch (s.kind) {
+    case 'search':
+      return `searched “${s.query ?? ''}”`;
+    case 'remember':
+      return `remembered: ${s.note ?? ''}`;
+    case 'literature_list':
+      return 'listed the literature library';
+    case 'literature_search':
+      return `searched the literature for “${s.query ?? ''}”`;
+    case 'literature_read':
+      return `read 《${s.literature ?? 'literature'}》`;
+    case 'figure':
+      return `looked at figure ${s.query ?? ''} of 《${s.literature ?? 'literature'}》`;
+    case 'notes':
+      return 'consulted long-term notes';
+    case 'delegate': {
+      const layer = s.depth ? ` (layer ${s.depth + 1})` : '';
+      return `dispatched a subagent${layer}: ${s.task ?? ''}`;
+    }
+    case 'read':
+    default:
+      return 'read the document';
+  }
 }
 
 /** Context captured at send time and stored on the user message (drives Retry). */
@@ -1190,19 +1263,14 @@ function MessageBubble({
       )}
 
       {(message.steps ?? []).map(s => (
-        <div className="chat-step" key={s.at}>
+        <div
+          className={`chat-step${s.depth ? ` chat-step--nested` : ''}`}
+          key={s.at}
+          style={s.depth ? {marginLeft: Math.min(s.depth, 3) * 14} : undefined}>
           {s.kind !== 'remember' && (
-            <span className="chat-step-icon">
-              {s.kind === 'search' ? '🔍' : '📖'}
-            </span>
+            <span className="chat-step-icon">{STEP_ICON[s.kind] ?? '🔧'}</span>
           )}
-          <span className="chat-step-text">
-            {s.kind === 'search'
-              ? `searched “${s.query ?? ''}”`
-              : s.kind === 'remember'
-                ? `remembered: ${s.note ?? ''}`
-                : 'read the document'}
-          </span>
+          <span className="chat-step-text">{stepLabel(s)}</span>
           {s.hits !== undefined && (
             <span className="chat-step-hits">
               {s.hits}
@@ -1475,20 +1543,30 @@ function MemoryPanel({
           {memories.length === 0 && (
             <div className="mem-empty">
               No notes yet. When memory is on, the AI saves important project
-              context here as it works.
+              context here as it works — including per-paper notes for uploaded
+              literature.
             </div>
           )}
-          {memories.map(m => (
-            <div className="mem-item" key={m.id}>
-              <div className="mem-item-body">{m.content}</div>
-              <button
-                type="button"
-                className="mem-item-del"
-                title="Delete note"
-                aria-label="Delete note"
-                onClick={() => void deleteMemory(m.id)}>
-                ✕
-              </button>
+          {groupMemories(memories).map(group => (
+            <div className="mem-group" key={group.key}>
+              {group.title !== null && (
+                <div className="mem-group-title" title={group.title}>
+                  📄 {group.title}
+                </div>
+              )}
+              {group.notes.map(m => (
+                <div className="mem-item" key={m.id}>
+                  <div className="mem-item-body">{m.content}</div>
+                  <button
+                    type="button"
+                    className="mem-item-del"
+                    title="Delete note"
+                    aria-label="Delete note"
+                    onClick={() => void deleteMemory(m.id)}>
+                    ✕
+                  </button>
+                </div>
+              ))}
             </div>
           ))}
         </div>

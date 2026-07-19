@@ -58,16 +58,31 @@ export type AssistantAction =
 
 /**
  * A non-terminal agent step — the AI inspected the document (read all of it, or
- * searched for a term) or saved a long-term memory note. Shown as a chip in the
- * message. These do NOT stop the loop; only an AssistantAction (or no action)
- * does.
+ * searched for a term), consulted the literature library, saved a long-term
+ * memory note, or dispatched a subagent. Shown as a chip in the message. These
+ * do NOT stop the loop; only an AssistantAction (or no action) does.
  */
 export interface AgentStep {
-  kind: 'read' | 'search' | 'remember';
-  /** search query, or undefined for a full read */
+  kind:
+    | 'read'
+    | 'search'
+    | 'remember'
+    | 'literature_list'
+    | 'literature_search'
+    | 'literature_read'
+    | 'figure'
+    | 'notes'
+    | 'delegate';
+  /** search/literature_search query, figure `#seq`, or undefined for a full read */
   query?: string;
   /** remember: the note the AI saved. */
   note?: string;
+  /** literature_read/figure: the literature title involved. */
+  literature?: string;
+  /** delegate: the delegated task briefing (truncated). */
+  task?: string;
+  /** delegate/sub-step: nesting depth (1..3) — the main agent is depth 0. */
+  depth?: number;
   /** read/search: how many characters/snippets came back (for the chip label). */
   hits?: number;
   at: number;

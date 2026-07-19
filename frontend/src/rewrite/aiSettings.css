@@ -126,3 +126,19 @@
   display: flex;
   gap: 8px;
 }
+
+.ai-field--check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-field--check input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.ai-field--check .ai-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}

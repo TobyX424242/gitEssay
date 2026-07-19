@@ -14,6 +14,9 @@ import {api} from '../utils/api';
 export interface Memory {
   id: string;
   project_id: string;
+  /** Set when the note is scoped to one literature item (a per-paper note). */
+  literature_id: string | null;
+  literature_title: string | null;
   content: string;
   created_at: number;
 }
@@ -21,6 +24,8 @@ export interface Memory {
 interface ApiMemory {
   id: string;
   project_id: string;
+  literature_id: string | null;
+  literature_title: string | null;
   content: string;
   created_at: number;
 }

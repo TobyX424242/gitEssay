@@ -13,12 +13,23 @@ os.environ["GITESSAY_DB"] = os.path.join(tempfile.mkdtemp(prefix="ge-test-"), "t
 import pytest
 from fastapi.testclient import TestClient
 
+from app.db import SessionLocal
 from app.main import app
 
 
 @pytest.fixture()
 def client():
     return TestClient(app)
+
+
+@pytest.fixture()
+def db():
+    """A direct DB session on the shared test database."""
+    s = SessionLocal()
+    try:
+        yield s
+    finally:
+        s.close()
 
 
 @pytest.fixture()

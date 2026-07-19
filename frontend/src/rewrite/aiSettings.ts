@@ -22,6 +22,10 @@ export interface AISettings {
   temperature: number;
   maxInputTokens: number;
   maxOutputTokens: number;
+  /** User-declared: the model can see images (agent may send literature figures). */
+  visionCapable: boolean;
+  /** Optional embedding model on the same OpenAI-compatible base URL; blank = FTS-only. */
+  embeddingModel: string;
 }
 
 export const DEFAULT_MODEL: Record<ProviderFormat, string> = {
@@ -43,6 +47,8 @@ export const DEFAULT_SETTINGS: AISettings = {
   temperature: 0.7,
   maxInputTokens: 16000,
   maxOutputTokens: 8000,
+  visionCapable: false,
+  embeddingModel: '',
 };
 
 interface ApiSettings {
@@ -52,6 +58,8 @@ interface ApiSettings {
   temperature: number;
   max_input_tokens: number;
   max_output_tokens: number;
+  vision_capable: boolean;
+  embedding_model: string;
   has_key: boolean;
   api_key: string;
 }
@@ -66,6 +74,8 @@ function mapIn(a: ApiSettings): AISettings {
     temperature: a.temperature,
     maxInputTokens: a.max_input_tokens,
     maxOutputTokens: a.max_output_tokens,
+    visionCapable: !!a.vision_capable,
+    embeddingModel: a.embedding_model ?? '',
   };
 }
 
@@ -78,6 +88,8 @@ export function toApiBody(s: AISettings): Record<string, unknown> {
     temperature: s.temperature,
     max_input_tokens: s.maxInputTokens,
     max_output_tokens: s.maxOutputTokens,
+    vision_capable: s.visionCapable,
+    embedding_model: s.embeddingModel,
     api_key: s.apiKey ? s.apiKey : null,
   };
 }

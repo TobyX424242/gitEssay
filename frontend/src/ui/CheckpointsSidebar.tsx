@@ -1,14 +1,19 @@
 /**
- * gitEssay — left Versions dock (checkpoints), mirroring the AI chat dock.
- * Collapsible + resizable; holds the checkpoint list so it is always reachable
- * regardless of document length. It stays open during compare mode; the
- * "Exit compare" button lives inside the list next to the Compare button.
- * Toggled from the app bar or its left-edge tab.
+ * gitEssay — left dock, tabbed between "Versions" (checkpoint history) and
+ * "Literature" (the uploaded reference library). Collapsible + resizable; the
+ * dock stays open during compare mode. Toggled from the app bar or its
+ * left-edge tab.
  */
 import {type JSX, useEffect} from 'react';
 
-import {versionsPanel} from '../chat/panelStore';
+import {
+  openLeftDock,
+  setLeftDockTab,
+  useLeftDockTab,
+  versionsPanel,
+} from '../chat/panelStore';
 import CheckpointsList from './CheckpointsList';
+import LiteraturePanel from './LiteraturePanel';
 import {SidePanelResizer} from './SidePanelResizer';
 import {useScrollTrap} from './useScrollTrap';
 import {useSidePanel} from './sidePanelStore';
@@ -16,6 +21,7 @@ import {useSidePanel} from './sidePanelStore';
 export default function CheckpointsSidebar(): JSX.Element {
   const {open, width} = useSidePanel(versionsPanel);
   const trapRef = useScrollTrap();
+  const tab = useLeftDockTab();
 
   useEffect(() => {
     document.body.style.setProperty('--ge-versions-width', `${width}px`);
@@ -30,14 +36,24 @@ export default function CheckpointsSidebar(): JSX.Element {
   return (
     <>
       {!open && (
-        <button
-          type="button"
-          className="side-reopen side-reopen--left"
-          onClick={() => versionsPanel.open()}
-          title="Open version history"
-          aria-label="Open version history">
-          Versions ›
-        </button>
+        <div className="side-reopen-stack side-reopen-stack--left">
+          <button
+            type="button"
+            className="side-reopen side-reopen--left"
+            onClick={() => openLeftDock('versions')}
+            title="Open version history"
+            aria-label="Open version history">
+            Versions ›
+          </button>
+          <button
+            type="button"
+            className="side-reopen side-reopen--left"
+            onClick={() => openLeftDock('literature')}
+            title="Open literature library"
+            aria-label="Open literature library">
+            Literature ›
+          </button>
+        </div>
       )}
       <aside
         ref={trapRef}
@@ -45,18 +61,35 @@ export default function CheckpointsSidebar(): JSX.Element {
         aria-hidden={!open}>
         <SidePanelResizer store={versionsPanel} dockSide="left" />
         <header className="dock-header">
-          <span className="dock-title">Versions</span>
+          <div className="dock-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'versions'}
+              className={`dock-tab${tab === 'versions' ? ' is-active' : ''}`}
+              onClick={() => setLeftDockTab('versions')}>
+              Versions
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'literature'}
+              className={`dock-tab${tab === 'literature' ? ' is-active' : ''}`}
+              onClick={() => setLeftDockTab('literature')}>
+              Literature
+            </button>
+          </div>
           <button
             type="button"
             className="cp-close"
             onClick={() => versionsPanel.close()}
             title="Collapse"
-            aria-label="Collapse versions">
+            aria-label="Collapse panel">
             ‹
           </button>
         </header>
         <div className="dock-body">
-          <CheckpointsList />
+          {tab === 'versions' ? <CheckpointsList /> : <LiteraturePanel />}
         </div>
       </aside>
     </>

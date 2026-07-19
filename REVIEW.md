@@ -89,3 +89,20 @@ design trade-off (documented, no action).
 5. M13 (remaining) — a component-level test for the streaming finalize lifecycle.
 
 *(2026-07-19 second pass: M6, M8, M13-core, L1-chat, L2, L6 completed above.)*
+
+---
+
+## Addendum — literature/RAG feature pass (2026-07-19)
+
+The literature library (docling ingest, hybrid retrieval, nested subagents,
+vision, per-paper notes) landed after this review. Its known trade-offs,
+recorded in the same spirit:
+
+| # | Status | Location | Issue |
+|---|---|---|---|
+| N1 | ⚖️ | `backend/app/literature_search.py` (`_vector_ranking`) | Vector search loads ALL embedded chunks of a project into memory and computes cosine in Python — fine for a personal library (hundreds of papers), not for tens of thousands. Swap in sqlite-vec if it ever shows. |
+| N2 | ⚖️ | `backend/app/literature_ingest.py` | Embeddings are computed at ingest only: changing `embedding_model` does not re-embed existing papers (mixed spaces would silently blend). Re-upload to re-embed. |
+| N3 | ⚖️ | `backend/app/agent_graph.py` | M10 deepened: nested subagents share the request-scoped SQLAlchemy Session (serial execution makes it safe today); the async-node rewrite (M10) should move each run to its own session. |
+| N4 | ⚖️ | `backend/app/agent_graph.py` | Subagent reports are plain text capped at 6k chars — no structured citations back to chunk ids; the parent cites by paper title only. |
+| N5 | ⚖️ | `backend/app/literature_ingest.py` | docling parsing is serialized process-wide (one lock) — uploads queue rather than parallelize. Deliberate (torch thread-safety + single-user), but a batch upload parses N× sequentially. |
+| N6 | ⚖️ | `frontend` | The legacy frontend agent loop has no literature tools — literature features require the LangGraph engine (README calls this out). |
