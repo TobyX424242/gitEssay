@@ -307,15 +307,15 @@ export async function runAgent(opts: RunAgentOpts): Promise<ChatMessage> {
       lastAction = parsed.action;
 
       // Non-terminal: remember → persist a long-term note, then loop.
-      const remember =
-        opts.memoryEnabled && opts.onRemember ? extractRememberAction(text) : null;
-      if (remember && lastAction === null) {
+      const onRemember = opts.memoryEnabled ? opts.onRemember : undefined;
+      const remember = onRemember ? extractRememberAction(text) : null;
+      if (remember && lastAction === null && onRemember) {
         // A failed save (transient backend error) must NOT abort the whole turn —
         // the user would lose everything already streamed. Isolate it and tell the
         // model the note wasn't stored so it doesn't act as though it persisted.
         let saved = true;
         try {
-          await opts.onRemember(remember.note);
+          await onRemember(remember.note);
         } catch {
           saved = false;
         }

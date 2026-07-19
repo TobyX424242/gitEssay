@@ -3,13 +3,14 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "description": "gitEssay — academic writing surface built on a forked Lexical playground (diff + checkpoint)",
+  "description": "gitEssay \u2014 academic writing surface built on a forked Lexical playground (diff + checkpoint)",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck:chat": "tsc -p tsconfig.chat-strict.json"
   },
   "dependencies": {
     "@atlaskit/drag-and-drop-indicator": "^0.11.1",
@@ -39,7 +40,6 @@
     "@lexical/table": "0.45.1-nightly.20260623.0",
     "@lexical/text": "0.45.1-nightly.20260623.0",
     "@lexical/utils": "0.45.1-nightly.20260623.0",
-    "@types/diff": "^7.0.2",
     "date-fns": "^4.1.0",
     "diff": "^9.0.0",
     "katex": "^0.16.10",

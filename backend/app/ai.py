@@ -17,6 +17,12 @@ from typing import AsyncIterator
 import httpx
 
 
+# Streaming timeout: the read window must tolerate slow reasoning models (long
+# first-byte / inter-chunk gaps), but a fully hung upstream must not leave the
+# SSE response dangling forever (the old `timeout=None` did exactly that).
+_STREAM_TIMEOUT = httpx.Timeout(connect=15.0, read=600.0, write=60.0, pool=60.0)
+
+
 class ModelEmptyResponse(RuntimeError):
     """The API responded (HTTP ok) but returned no visible text. Almost always
     `finish_reason=length` on a reasoning/thinking model whose thinking tokens
@@ -165,10 +171,8 @@ async def _openai_stream(s, system: str, messages: list) -> AsyncIterator[dict]:
         "max_tokens": s.max_output_tokens,
         "stream": True,
     }
-    # timeout=None: streaming first-byte / inter-chunk gaps can exceed the
-    # default pool timeout, especially on slow reasoning models.
     try:
-        async with httpx.AsyncClient(timeout=None) as client:
+        async with httpx.AsyncClient(timeout=_STREAM_TIMEOUT) as client:
             async with client.stream(
                 "POST",
                 endpoint(s),
@@ -214,7 +218,7 @@ async def _anthropic_stream(s, system: str, messages: list) -> AsyncIterator[dic
         "stream": True,
     }
     try:
-        async with httpx.AsyncClient(timeout=None) as client:
+        async with httpx.AsyncClient(timeout=_STREAM_TIMEOUT) as client:
             async with client.stream(
                 "POST",
                 endpoint(s),

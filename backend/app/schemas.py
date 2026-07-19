@@ -1,5 +1,5 @@
 """gitEssay backend — Pydantic request/response schemas."""
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -40,7 +40,9 @@ class CheckpointOut(BaseModel):
 class CheckpointCapture(BaseModel):
     state: dict[str, Any]
     label: Optional[str] = None
-    source: str = "manual"
+    # Mirrors the frontend's CheckpointSource union. Anything other than "auto"
+    # is treated as durable by the capture endpoint.
+    source: Literal["init", "manual", "auto", "restore", "ai-accept"] = "manual"
     skip_if_unchanged: bool = False
 
 
@@ -79,7 +81,8 @@ class MessageReplace(BaseModel):
 
 
 class EditStatePatch(BaseModel):
-    state: str
+    # Mirrors the frontend's ChatEditState union.
+    state: Literal["pending", "applied", "rejected", "unlocatable", "stale", "reverted"]
 
 
 # ---- memories (AI long-term, project-scoped notes) ------------------------
@@ -126,7 +129,9 @@ class AISettingsOut(BaseModel):
 
 
 class AISettingsIn(BaseModel):
-    provider_format: Optional[str] = None
+    # Anything not exactly "anthropic" is spoken to as OpenAI — reject typos at
+    # the door instead of silently using the wrong protocol.
+    provider_format: Optional[Literal["openai", "anthropic"]] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     model: Optional[str] = None
@@ -147,7 +152,7 @@ class AgentRunRequest(BaseModel):
     editor; the agent reads/searches that snapshot via tools."""
     project_id: str
     instruction: str
-    mode: str = "document"  # 'selection' | 'document'
+    mode: Literal["selection", "document"] = "document"
     selection_text: str = ""
     doc_paragraphs: list[str]
     history: list[dict[str, Any]] = []  # [{role: 'user'|'assistant', content: str}]

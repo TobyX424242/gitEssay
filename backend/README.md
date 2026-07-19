@@ -32,10 +32,21 @@ empty-doc `init` checkpoint) and a default AI-settings row.
   granular message ops `POST /conversations/{id}/messages` (append),
   `PUT /conversations/{id}/messages/{mid}` (replace — retry),
   `PATCH /conversations/{id}/messages/{mid}/edits/{idx}` (accept/reject state)
-- **AI**: `POST /chat` `{system,user}`→`{content}` (uses server settings),
-  `GET/PUT /ai/settings` (key masked on read; `api_key=null` keeps existing),
-  `POST /ai/test`, `POST /agent/run` (501 stub — future LangGraph)
+- **Memories** (project-scoped agent notes): `GET/POST /projects/{pid}/memories`,
+  `DELETE /memories/{mid}`
+- **AI**: `POST /chat` `{system,user}`→`{content}` (blocking, uses server
+  settings), `POST /chat/stream` (SSE; normalized
+  `{type: thinking|text|done|error}` events), `GET/PUT /ai/settings` (key masked
+  on read; `api_key=null` keeps existing), `POST /ai/test`,
+  `POST /agent/run` (SSE; LangGraph ReAct agent — the backend owns the
+  tool loop: read/search/remember/ask_user/propose_patch)
 
 The Lexical `SerializedEditorState` is stored as opaque JSON (the backend never
 parses it). The Vite dev server proxies `/api` → `http://localhost:8000`
 (`frontend/vite.config.ts`).
+
+## Tests
+
+```bash
+uv run pytest    # checkpoint DAG/retention, conversations, project cascade
+```

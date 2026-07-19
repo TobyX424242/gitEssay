@@ -4,6 +4,7 @@ Messages are stored as a JSON array. Granular ops mirror the frontend store:
 append messages (send), replace one message (retry), and patch an edit's state.
 """
 import json
+import threading
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +16,14 @@ from app.deps import get_project_or_404
 from app.models import Conversation, Project, new_id, now_ms
 
 router = APIRouter(tags=["conversations"])
+
+# Messages live in a single JSON column, so the granular ops below are
+# read-modify-write. FastAPI runs these `def` endpoints in a threadpool, so two
+# concurrent requests (e.g. a streaming persist racing a retry) can interleave
+# and silently drop one update. SQLite offers no lock across the read→write
+# gap, and this is a single-user, single-process app — a process-local lock is
+# the proportionate fix.
+_messages_lock = threading.Lock()
 
 
 def to_out(c: Conversation) -> dict:
@@ -102,17 +111,18 @@ def patch_conversation(
 def append_messages(
     cid: str, body: schemas.MessageAppend, db: Session = Depends(get_db)
 ):
-    conv = db.get(Conversation, cid)
-    if conv is None:
-        raise HTTPException(status_code=404, detail="conversation not found")
-    msgs = json.loads(conv.messages)
-    msgs.extend(body.messages)
-    conv.messages = json.dumps(msgs)
-    if body.title is not None:
-        conv.title = body.title
-    conv.updated_at = now_ms()
-    db.commit()
-    return to_out(conv)
+    with _messages_lock:
+        conv = db.get(Conversation, cid)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="conversation not found")
+        msgs = json.loads(conv.messages)
+        msgs.extend(body.messages)
+        conv.messages = json.dumps(msgs)
+        if body.title is not None:
+            conv.title = body.title
+        conv.updated_at = now_ms()
+        db.commit()
+        return to_out(conv)
 
 
 @router.put(
@@ -124,17 +134,18 @@ def replace_message(
     body: schemas.MessageReplace,
     db: Session = Depends(get_db),
 ):
-    conv = db.get(Conversation, cid)
-    if conv is None:
-        raise HTTPException(status_code=404, detail="conversation not found")
-    msgs = json.loads(conv.messages)
-    if not any(isinstance(m, dict) and m.get("id") == mid for m in msgs):
-        raise HTTPException(status_code=404, detail="message not found")
-    msgs = [body.message if (isinstance(m, dict) and m.get("id") == mid) else m for m in msgs]
-    conv.messages = json.dumps(msgs)
-    conv.updated_at = now_ms()
-    db.commit()
-    return to_out(conv)
+    with _messages_lock:
+        conv = db.get(Conversation, cid)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="conversation not found")
+        msgs = json.loads(conv.messages)
+        if not any(isinstance(m, dict) and m.get("id") == mid for m in msgs):
+            raise HTTPException(status_code=404, detail="message not found")
+        msgs = [body.message if (isinstance(m, dict) and m.get("id") == mid) else m for m in msgs]
+        conv.messages = json.dumps(msgs)
+        conv.updated_at = now_ms()
+        db.commit()
+        return to_out(conv)
 
 
 @router.patch(
@@ -144,22 +155,23 @@ def replace_message(
 def set_edit_state(
     cid: str, mid: str, idx: int, body: schemas.EditStatePatch, db: Session = Depends(get_db)
 ):
-    conv = db.get(Conversation, cid)
-    if conv is None:
-        raise HTTPException(status_code=404, detail="conversation not found")
-    msgs = json.loads(conv.messages)
-    applied = False
-    for m in msgs:
-        if isinstance(m, dict) and m.get("id") == mid and isinstance(m.get("edits"), list):
-            if 0 <= idx < len(m["edits"]):
-                m["edits"][idx]["state"] = body.state
-                applied = True
-    if not applied:
-        raise HTTPException(status_code=404, detail="edit not found")
-    conv.messages = json.dumps(msgs)
-    conv.updated_at = now_ms()
-    db.commit()
-    return to_out(conv)
+    with _messages_lock:
+        conv = db.get(Conversation, cid)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="conversation not found")
+        msgs = json.loads(conv.messages)
+        applied = False
+        for m in msgs:
+            if isinstance(m, dict) and m.get("id") == mid and isinstance(m.get("edits"), list):
+                if 0 <= idx < len(m["edits"]):
+                    m["edits"][idx]["state"] = body.state
+                    applied = True
+        if not applied:
+            raise HTTPException(status_code=404, detail="edit not found")
+        conv.messages = json.dumps(msgs)
+        conv.updated_at = now_ms()
+        db.commit()
+        return to_out(conv)
 
 
 @router.delete("/conversations/{cid}")

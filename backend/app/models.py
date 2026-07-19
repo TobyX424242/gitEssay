@@ -1,8 +1,6 @@
 """gitEssay backend — ORM models (SQLAlchemy)."""
-import json
 import time
 import uuid
-
 from sqlalchemy import Column, Float, ForeignKey, Integer, String, Text
 
 from app.db import Base

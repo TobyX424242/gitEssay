@@ -1,22 +1,12 @@
 /**
  * gitEssay — coding-agent-style patch parsing + application.
  *
- * Two output protocols coexist:
- *
- *  (A) SEARCH/REPLACE blocks (legacy, Aider/Cline convention):
- *        <<<<<<< SEARCH
- *        <verbatim passage from the document, within a single block>
- *        =======
- *        <replacement text>
- *        >>>>>>> REPLACE
- *      parsePatches() splits legacy output into prose + edits.
- *
- *  (B) The streaming agent's <thinking>/<action> protocol (current):
+ * The streaming agent's <thinking>/<action> protocol:
  *        <thinking>…step-by-step reasoning…</thinking>
  *        <action>{ "kind": "patch|ask|finish|read|search", … }</action>
- *      parseTurn() splits a finished turn into {thinking, prose, action};
- *      extractPartialAction() / stripMarkup() / extractThinking() power the
- *      LIVE streaming view (partial-aware, so raw markup never shows in prose).
+ * parseTurn() splits a finished turn into {thinking, prose, action};
+ * extractPartialAction() / stripMarkup() / extractThinking() power the
+ * LIVE streaming view (partial-aware, so raw markup never shows in prose).
  *
  * applyTextPatch locates the SEARCH text verbatim within a single top-level
  * block and splices the replacement into the covering TextNodes (the replacement
@@ -50,10 +40,6 @@ import {
   type SentinelKind,
 } from './sentinels';
 
-const SEARCH_START = /<{4,}\s*SEARCH\b/;
-const DIVIDER = /^={4,}\s*$/;
-const REPLACE_END = /^>{4,}\s*(REPLACE|ENDED)\b/;
-
 // --- agent protocol markup -------------------------------------------------
 // Partial-aware: an unclosed block matches to end-of-string ($), so a streaming
 // <thinking>… or <action>… tail is stripped from the live prose view before the
@@ -69,63 +55,6 @@ const ACTION_RE_PARTIAL = /<action>([\s\S]*)$/i; // open tail (for stripping)
 // would strip only the first and leave the second as literal text in the prose.
 const THINKING_RE_ALL = /<thinking>[\s\S]*?(<\/thinking>|$)/gi;
 const ACTION_RE_ALL = /<action>[\s\S]*?<\/action>/gi;
-
-/**
- * Parse model output into {prose, edits}. Tolerant of surrounding code fences.
- * Text outside SEARCH/REPLACE blocks is treated as the assistant's prose.
- */
-export function parsePatches(raw: string): {prose: string; edits: ChatEdit[]} {
-  const edits: ChatEdit[] = [];
-  const proseParts: string[] = [];
-
-  // Strip a single wrapping code fence if present.
-  const text = raw.replace(/^```[a-zA-Z0-9]*\s*\n/, '').replace(/\n```\s*$/, '');
-
-  const lines = text.split('\n');
-  let i = 0;
-  let proseStart = 0;
-  while (i < lines.length) {
-    if (SEARCH_START.test(lines[i])) {
-      // flush prose before this block
-      if (i > proseStart) {
-        proseParts.push(lines.slice(proseStart, i).join('\n'));
-      }
-      i++;
-      const searchLines: string[] = [];
-      while (i < lines.length && !DIVIDER.test(lines[i])) {
-        searchLines.push(lines[i]);
-        i++;
-      }
-      // skip the divider line
-      if (i < lines.length && DIVIDER.test(lines[i])) {
-        i++;
-      }
-      const replaceLines: string[] = [];
-      while (i < lines.length && !REPLACE_END.test(lines[i])) {
-        replaceLines.push(lines[i]);
-        i++;
-      }
-      // skip the end line
-      if (i < lines.length && REPLACE_END.test(lines[i])) {
-        i++;
-      }
-      const search = searchLines.join('\n').trim();
-      const replace = replaceLines.join('\n').trim();
-      if (search) {
-        edits.push({search, replace});
-      }
-      proseStart = i;
-    } else {
-      i++;
-    }
-  }
-  if (i > proseStart) {
-    proseParts.push(lines.slice(proseStart).join('\n'));
-  }
-
-  const prose = proseParts.join('\n').trim();
-  return {prose, edits};
-}
 
 // --- streaming agent protocol ---------------------------------------------
 /** Tagged <thinking> content (complete OR partial-to-end) — for the live pane. */
@@ -590,7 +519,7 @@ function inRegionDecos(items: InlineItem[], spans: Span[], found: Span): InlineI
 function validateReplace(
   segs: Segment[],
   regionDecos: InlineItem[],
-): {ok: boolean; reason?: string} {
+): {ok: true} | {ok: false; reason: string} {
   // Decorator items only (text items carry no nonce); build a consume-once pool.
   const pool = regionDecos.flatMap(d =>
     d.kind === 'text' ? [] : [{kind: d.kind, nonce: d.nonce}],
@@ -618,35 +547,20 @@ function parentKey(node: LexicalNode): string | undefined {
   return node.getParent()?.getKey();
 }
 
+/** Structured failure kind for a patch edit (set on every `{ok:false}` result). */
+export type PatchFailKind = 'not-found' | 'empty' | 'sentinel' | 'structure';
+
 export interface PatchResult {
   ok: boolean;
+  /** Structured failure kind (set whenever `ok === false`). */
+  kind?: PatchFailKind;
   reason?: string;
 }
 
-/**
- * Read-only probe: does `needle` appear in any top-level block of the live
- * editor? Uses the same tolerant `locate` as applyTextPatch, but never mutates.
- * Used by the patch-fallback layer to classify a failing edit.
- */
-export function searchInEditor(editor: LexicalEditor, needle: string): boolean {
-  if (!needle) {
-    return false;
-  }
-  let found = false;
-  editor.getEditorState().read(() => {
-    for (const block of $getRoot().getChildren()) {
-      const items = blockInlineItems(block);
-      if (items.length === 0) {
-        continue;
-      }
-      if (locate(itemsToText(items), needle)) {
-        found = true;
-        return;
-      }
-    }
-  });
-  return found;
-}
+/** Read-only decision result for a single edit (locate + validate, no mutation). */
+export type LocateResult =
+  | {ok: true; blockKey: string; path: 'text' | 'sentinel'}
+  | {ok: false; kind: PatchFailKind; reason: string};
 
 /**
  * Read-only probe: does `needle` appear in `haystack` (a flat snapshot string)?
@@ -660,44 +574,37 @@ export function textContains(haystack: string, needle: string): boolean {
   return locate(haystack, needle) !== null;
 }
 
-interface PatchDecision {
-  blockKey: string;
-  start: number;
-  end: number;
-  path: 'text' | 'sentinel';
-  /** When set, the edit was located but is invalid (validation/structure). */
-  reason?: string;
-}
-
 /**
- * Locate `search` within a single top-level block and replace it with `replace`.
+ * Read-only decision phase shared by `applyTextPatch` (which then mutates) and
+ * `classifyPatch` (a pre-flight probe, no mutation). Locates `search` in a single
+ * top-level block and validates `replace` against the in-region decorators.
  *
- * Two splice paths:
- *  - `text`  — the search passage contains no atomic node. Reuses the proven
- *    text-node splice (works even when the text is nested, e.g. inside a link).
- *  - `sentinel` — the passage spans a citation/equation. Requires every touched
- *    node to be a direct child of the block (the realistic prose case), so the
- *    decorator can be cloned/removed predictably. `replace`'s sentinels are
- *    validated against the in-region decorators (see `validateReplace`).
+ * Returns the splice path on success, or a structured failure kind:
+ *  - 'empty'     — blank search text.
+ *  - 'not-found' — search not located in any block.
+ *  - 'structure' — located, but spans nested formatting around a decorator.
+ *  - 'sentinel'  — located, but `replace` references a citation/equation not in
+ *                  the search passage (validateReplace).
  *
- * Locating + the validity decision run in a synchronous read (authoritative
- * before any mutation); the splice runs in an `editor.update`. The update
- * re-derives items (the read's node refs are invalid in the update state); the
- * state is unchanged between the two, so the same offsets locate the same range.
+ * The editor state is unchanged between this read and applyTextPatch's
+ * `editor.update`, so the same offsets locate the same range; the mutate phase
+ * re-derives them (the read's node refs are invalid in the update state).
  */
-export async function applyTextPatch(
+export function locateEdit(
   editor: LexicalEditor,
   search: string,
   replace: string,
-): Promise<PatchResult> {
+): LocateResult {
   const needle = search.trim();
   if (needle.length === 0) {
-    return Promise.resolve({ok: false, reason: 'empty search text'});
+    return {ok: false, kind: 'empty', reason: 'empty search text'};
   }
   const replaceSegs = parseSegments(replace);
-
-  // Phase 1 (read): locate, choose the path, validate sentinels.
-  let decision: PatchDecision | null = null;
+  let result: LocateResult = {
+    ok: false,
+    kind: 'not-found',
+    reason: 'passage not found in the document',
+  };
   editor.getEditorState().read(() => {
     for (const block of $getRoot().getChildren()) {
       const items = blockInlineItems(block);
@@ -723,11 +630,9 @@ export async function applyTextPatch(
       if (hasDeco) {
         const flat = touched.every(it => parentKey(it.node) === blockKey);
         if (!flat) {
-          decision = {
-            blockKey,
-            start: found.start,
-            end: found.end,
-            path: 'sentinel',
+          result = {
+            ok: false,
+            kind: 'structure',
             reason:
               'edit spans nested formatting around a citation/equation — select a simpler passage',
           };
@@ -738,25 +643,50 @@ export async function applyTextPatch(
 
       const regionDecos = inRegionDecos(items, spans, found);
       const v = validateReplace(replaceSegs, regionDecos);
-      if (!v.ok) {
-        decision = {blockKey, start: found.start, end: found.end, path, reason: v.reason};
+      // `in`-narrow (not `!v.ok`) — the project compiles with strict:false,
+      // where discriminated-union narrowing is unreliable.
+      if ('reason' in v) {
+        result = {ok: false, kind: 'sentinel', reason: v.reason};
         return;
       }
-      decision = {blockKey, start: found.start, end: found.end, path};
+      result = {ok: true, blockKey, path};
       return;
     }
   });
+  return result;
+}
 
-  if (!decision) {
-    return Promise.resolve({ok: false, reason: 'passage not found in the document'});
+/**
+ * Locate `search` within a single top-level block and replace it with `replace`.
+ *
+ * Two splice paths:
+ *  - `text`  — the search passage contains no atomic node. Reuses the proven
+ *    text-node splice (works even when the text is nested, e.g. inside a link).
+ *  - `sentinel` — the passage spans a citation/equation. Requires every touched
+ *    node to be a direct child of the block (the realistic prose case), so the
+ *    decorator can be cloned/removed predictably. `replace`'s sentinels are
+ *    validated against the in-region decorators (see `validateReplace`).
+ *
+ * The decision runs via `locateEdit` (a synchronous read, authoritative before
+ * any mutation); the splice runs in an `editor.update`. The update re-derives
+ * items (the read's node refs are invalid in the update state); the state is
+ * unchanged between the two, so the same offsets locate the same range.
+ */
+export async function applyTextPatch(
+  editor: LexicalEditor,
+  search: string,
+  replace: string,
+): Promise<PatchResult> {
+  const needle = search.trim();
+  const decision = locateEdit(editor, search, replace);
+  // `in`-narrow (not `decision.ok`) — the project compiles with strict:false,
+  // where `ok: true | false` discriminant narrowing is unreliable.
+  if (!('blockKey' in decision)) {
+    return {ok: false, kind: decision.kind, reason: decision.reason};
   }
-  if (decision.reason) {
-    return Promise.resolve({ok: false, reason: decision.reason});
-  }
-
-  // Phase 2 (update): execute the chosen splice.
-  const d = decision;
+  const replaceSegs = parseSegments(replace);
   const replaceText = replaceSegs.map(s => ('text' in s ? s.text : '')).join('');
+  const {blockKey, path} = decision;
   // Await the update so callers see the COMMITTED editor state. Without this, a
   // caller that reads the doc right after (notably retry: it reverts patches then
   // immediately re-runs the agent, which snapshots the doc) could read the
@@ -764,11 +694,11 @@ export async function applyTextPatch(
   // produce no new patch. It also ensures a checkpoint captured just after
   // reflects the post-edit state, not the pre-edit one.
   await editor.update(() => {
-    const block = $getNodeByKey(d.blockKey);
+    const block = $getNodeByKey(blockKey);
     if (!$isElementNode(block)) {
       return;
     }
-    if (d.path === 'sentinel') {
+    if (path === 'sentinel') {
       sentinelSplice(block, needle, replaceSegs);
     } else {
       textSplice(block, needle, replaceText);

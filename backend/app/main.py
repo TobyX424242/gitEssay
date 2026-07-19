@@ -3,6 +3,7 @@
 Run:  uv run uvicorn app.main:app --reload --port 8000
 """
 import json
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,9 +54,18 @@ Base.metadata.create_all(bind=engine)
 _seed()
 
 app = FastAPI(title="gitEssay backend")
+# Single-user local app with no auth and a server-side LLM key: an open CORS
+# policy would let ANY website the user visits drive this backend (read data,
+# burn LLM quota). In practice the browser never needs CORS at all — the Vite
+# dev server and the docker nginx both proxy /api same-origin — so default to
+# the local dev origins only; override with GITESSAY_CORS_ORIGINS (comma-sep).
+_cors_origins = os.environ.get(
+    "GITESSAY_CORS_ORIGINS",
+    "http://localhost:5180,http://127.0.0.1:5180",
+).split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in _cors_origins if o.strip()],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

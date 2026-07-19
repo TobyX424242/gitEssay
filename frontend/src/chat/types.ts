@@ -103,6 +103,10 @@ export interface ChatMessage {
   snapshot?: string;
   /** Assistant patch only: a patch-level failure that supersedes the patch card.
    *  'ignored' = mis-copied past the retry budget (dropped); 'stale' = the
-   *  underlying text changed while the AI worked (can't complete). */
-  patchFailure?: 'ignored' | 'stale';
+   *  underlying text changed while the AI worked (can't complete); 'invalid' =
+   *  structurally un-applicable (references a citation/equation not in the search
+   *  passage, or spans nested formatting around a decorator). */
+  patchFailure?: 'ignored' | 'stale' | 'invalid';
+  /** When `patchFailure === 'invalid'`, the specific reason (from applyTextPatch). */
+  patchFailureReason?: string;
 }

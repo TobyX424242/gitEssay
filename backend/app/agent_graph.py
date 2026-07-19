@@ -15,7 +15,6 @@ text / thinking / step / patch / ask / done / error.
 from langchain.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 
-from app import ai
 from app.agent_prompt import build_system_prompt, load_memories
 from app.agent_state import AgentState
 from app.agent_tools import (
