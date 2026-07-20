@@ -8,6 +8,14 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+    # Merge-to-main validation build: artifacts only, no Release (the
+    # `release` job is gated on refs/tags/v). Branch/PR pushes get the
+    # lightweight ci.yml instead.
+    branches: [main]
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write  # tag builds publish a GitHub Release
