@@ -6,6 +6,8 @@
 # Output: dist/gitessay/  — run dist/gitessay/gitessay (or gitessay.exe).
 # See DESKTOP.md for cross-platform notes (PyInstaller cannot cross-compile;
 # build on each target OS, e.g. via .github/workflows/desktop.yml).
+import os
+
 from PyInstaller.utils.hooks import collect_all
 
 datas = [("../frontend/build", "frontend")]
@@ -107,7 +109,11 @@ coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
-    strip=True,  # ~150 MB of debug symbols; no-op on Windows
+    # ~150 MB of debug symbols on Linux/macOS. Must stay OFF on Windows:
+    # CI runners have Git-Bash strip.exe on PATH, and GNU strip mangles PE
+    # binaries (it even chokes on arm64 DLLs) — a stripped build failed the
+    # smoke test (exe would not start).
+    strip=(os.name != "nt"),
     upx=False,  # UPX inflates antivirus false-positive rates; skip it
     name="gitessay",
 )

@@ -118,9 +118,12 @@ def smoke_test() -> None:
         port = s.getsockname()[1]
     proc = subprocess.Popen(
         [binary, "--server-only", "--port", str(port)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
     )
+    ok = False
     try:
         base = f"http://127.0.0.1:{port}"
         deadline = time.monotonic() + 90
@@ -136,6 +139,7 @@ def smoke_test() -> None:
                 assert '"name"' in projects, "unexpected /api/projects payload"
                 assert "<html" in index.lower(), "frontend index.html not served"
                 log(f"smoke ok    GET / (html) + GET /api/projects @ {base}")
+                ok = True
                 return
             except Exception as e:  # noqa: BLE001 — server still starting
                 last_err = e
@@ -144,9 +148,16 @@ def smoke_test() -> None:
     finally:
         proc.terminate()
         try:
-            proc.wait(timeout=10)
+            out, _ = proc.communicate(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
+            out, _ = proc.communicate()
+        if not ok:
+            # Surface server output on failure — the smoke test is the only
+            # CI gate for frozen-build startup bugs, don't fly blind.
+            tail = "\n".join((out or "").splitlines()[-40:])
+            if tail.strip():
+                log(f"--- binary output tail ---\n{tail}")
 
 
 def dedupe_hardlinks() -> None:
