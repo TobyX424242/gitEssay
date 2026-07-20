@@ -41,7 +41,36 @@ EXCLUDES = [
     "wsproto",
     "watchfiles",
     "tkinter",
+    # torch's own test suites — never imported at runtime.
+    "torch.test",
+    "torch.testing",
+    # Only reachable via docling's ExtractionVlmPipeline (VLM extraction),
+    # which this app never uses (DocumentExtractor is not on any code path).
+    "faker",
+    "polyfactory",
+    # Optional HF download accelerator; huggingface_hub falls back to plain
+    # HTTP with a warning when it's absent.
+    "hf_xet",
+    # zstandard loads backend_c (C extension); _cffi is the unused fallback.
+    "zstandard._cffi",
 ]
+
+# Payload files (not Python modules) dropped after analysis:
+#  - torch/bin: upstream test binaries + protoc (~50 MB). torch_shm_manager
+#    is kept — torch's dataloader uses it for shared-memory tensors.
+#  - torch/test, torch/testing: test suites and data (~88 MB).
+#  - rapidocr *.onnx models: the app pins RapidOCR's torch backend (see
+#    app/literature_ingest.py), so only the bundled .pth models are used.
+DROP_DATA_PREFIXES = ("torch/bin/", "torch/test/", "torch/testing/")
+
+
+def _drop_payload(name: str) -> bool:
+    name = name.replace("\\", "/")
+    if name.startswith(DROP_DATA_PREFIXES):
+        return not name.endswith("torch/bin/torch_shm_manager")
+    if name.startswith("rapidocr/models/") and name.endswith(".onnx"):
+        return True
+    return False
 
 a = Analysis(
     ["desktop_main.py"],
@@ -54,6 +83,8 @@ a = Analysis(
     excludes=EXCLUDES,
     noarchive=False,
 )
+a.datas = [d for d in a.datas if not _drop_payload(d[0])]
+a.binaries = [b for b in a.binaries if not _drop_payload(b[0])]
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
@@ -72,7 +103,7 @@ coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
-    strip=False,
+    strip=True,  # ~150 MB of debug symbols; no-op on Windows
     upx=False,  # UPX inflates antivirus false-positive rates; skip it
     name="gitessay",
 )
