@@ -41,9 +41,13 @@ EXCLUDES = [
     "wsproto",
     "watchfiles",
     "tkinter",
-    # torch's own test suites — never imported at runtime.
+    # torch's own test suite — never imported at runtime.
+    # NOTE: `torch.testing` must NOT be excluded: in the frozen build its
+    # absence breaks torch's import chain so the first `import torch` fails
+    # partway (after torch._C._rpc_init() already ran); the retry then dies
+    # with "generic_type: cannot initialize type RpcBackendOptions: an object
+    # with that name is already defined". It costs ~2 MB in the PYZ — keep it.
     "torch.test",
-    "torch.testing",
     # Only reachable via docling's ExtractionVlmPipeline (VLM extraction),
     # which this app never uses (DocumentExtractor is not on any code path).
     "faker",

@@ -53,7 +53,8 @@ sidecar as-is.
 | `backend/desktop_main.py` + `backend/desktop.spec` | PyInstaller entry and packaging config (onedir, `collect_all(docling…, rapidocr)`, `strip=True`, torch test/bin payload dropped, no UPX to reduce antivirus false positives) |
 | `backend/pyproject.toml` | `desktop` dependency group (platformdirs / pywebview / pyinstaller) — `uv sync --group desktop` |
 | `scripts/build_desktop.py` | The single build entry point for local AND CI: frontend build → deps → PyInstaller → smoke test → versioned archive + SHA256 |
-| `.github/workflows/desktop.yml` | Three-platform CI matrix (PyInstaller can't cross-compile, so each OS builds its own bundle) that calls the same script; publishes a GitHub Release on `v*` tags |
+| `.github/workflows/desktop.yml` | Three-platform CI matrix (PyInstaller can't cross-compile, so each OS builds its own bundle) that calls the same script; publishes a GitHub Release on `v*` tags, validation-builds on pushes to `main`, and runs manually via `workflow_dispatch` |
+| `.github/workflows/ci.yml` | Lightweight per-push/PR CI: backend pytest + frontend build (packaging stays in desktop.yml) |
 
 ## Data locations
 
@@ -92,7 +93,8 @@ only, Intel Macs are not a target) are built by
 `.github/workflows/desktop.yml` — CI invokes the **same**
 `scripts/build_desktop.py` and only adds system dependencies, npm/uv caching,
 and artifact upload. Pushing a `v*` tag creates a GitHub Release with all
-archives and their checksums.
+archives and their checksums; pushes to `main` run the same matrix as a
+validation build (artifacts only, no Release).
 
 ## Risks and caveats
 
@@ -100,7 +102,13 @@ archives and their checksums.
    that ship data files (e.g. rapidocr's `default_models.yaml` and bundled
    .onnx models) must be `collect_all`'d in the spec, or the frozen build
    fails at runtime with `FileNotFoundError`. Watch for the same class of
-   issue when adding parsing dependencies.
+   issue when adding parsing dependencies. The inverse hazard exists too:
+   **over-excluding breaks torch** — `torch.testing` must stay in the PYZ
+   (excluding it makes the first `import torch` fail partway, after
+   `torch._C._rpc_init()` has already registered its pybind types; the retry
+   then dies with `generic_type: cannot initialize type "RpcBackendOptions":
+   an object with that name is already defined`). Rule of thumb: after ANY
+   spec change, smoke-test an actual PDF parse, not just server startup.
 1. **Size**: the torch(CPU) + docling + opencv chain sets the floor at ~1 GB
    (measured after the size trim: **981 MB onedir, ~390 MB as tar.gz**, down
    from 1.4 GB / 514 MB). The trim: `strip=True` in the spec (~150 MB of debug
