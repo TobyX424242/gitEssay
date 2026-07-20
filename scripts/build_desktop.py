@@ -149,6 +149,52 @@ def smoke_test() -> None:
             proc.kill()
 
 
+def dedupe_hardlinks() -> None:
+    """Collapse byte-identical payload files into hardlinks.
+
+    Wheels (numpy / scipy / opencv) each ship their own copies of shared
+    libraries (libgfortran, libquadmath, ...). Hardlinking identical copies
+    reclaims the duplicate blocks with zero runtime risk — dlopen handles
+    hardlinked inodes transparently, tar preserves hardlinks, and zip (which
+    can't) simply stores both copies again.
+    """
+    step("dedupe (hardlinks)")
+    bundle = os.path.join(DIST, "gitessay")
+    if not os.path.isdir(bundle):
+        die(f"bundle not found: {bundle}")
+    by_size: dict[int, list[str]] = {}
+    for root, _dirs, files in os.walk(bundle):
+        for f in files:
+            p = os.path.join(root, f)
+            if os.path.islink(p):
+                continue
+            st = os.stat(p)
+            if st.st_size < (1 << 20):  # hashing tiny files costs more than it saves
+                continue
+            by_size.setdefault(st.st_size, []).append(p)
+    saved = 0
+    for size, paths in by_size.items():
+        if len(paths) < 2:
+            continue
+        seen: dict[str, str] = {}
+        for p in paths:
+            h = hashlib.sha256()
+            with open(p, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(chunk)
+            original = seen.setdefault(h.hexdigest(), p)
+            if original is p:
+                continue
+            try:
+                tmp = p + ".lnk"
+                os.link(original, tmp)
+                os.replace(tmp, p)
+                saved += size
+            except OSError:
+                pass  # non-CoW/NTFS edge cases — keep both copies
+    log(f"dedupe    reclaimed {saved / 1024 / 1024:.0f} MB")
+
+
 def make_archive(version: str) -> str:
     step("archive")
     bundle = os.path.join(DIST, "gitessay")
@@ -204,6 +250,7 @@ def main() -> None:
     if not args.skip_smoke:
         smoke_test()
 
+    dedupe_hardlinks()
     out = make_archive(version)
     step("done")
     log(f"built {os.path.relpath(out, REPO)}")

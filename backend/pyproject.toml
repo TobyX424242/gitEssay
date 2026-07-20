@@ -20,6 +20,11 @@ dependencies = [
     "torchvision>=0.28",
     "python-multipart>=0.0.32",
     "numpy>=2.2.6",
+    # Headless OpenCV: docling pulls opencv-python, whose wheel bundles Qt GUI
+    # libs (~100 MB) and needs system libGL/libxcb at runtime. The headless
+    # build has the same API minus the GUI — see the override below, which
+    # prunes opencv-python from the resolution.
+    "opencv-python-headless>=4.10",
 ]
 
 [dependency-groups]
@@ -47,6 +52,11 @@ explicit = true
 [tool.uv.sources]
 torch = {index = "pytorch-cpu"}
 torchvision = {index = "pytorch-cpu"}
+
+# Prune the transitive opencv-python (docling) with an impossible marker —
+# opencv-python-headless above provides the same cv2 module without GUI libs.
+[tool.uv]
+override-dependencies = ["opencv-python; sys_platform == 'never'"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

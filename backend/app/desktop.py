@@ -31,6 +31,17 @@ def _log(msg: str) -> None:
         pass
 
 
+def _fix_windowed_stdio() -> None:
+    """Windowed frozen builds (desktop.spec: console=False) start with
+    sys.stdout/sys.stderr = None on Windows. uvicorn's logging setup then
+    crashes on `sys.stdout.isatty()`, and any later print/traceback/handler
+    write would crash too. Redirect the missing streams to devnull."""
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8", errors="replace")  # noqa: SIM115
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8", errors="replace")  # noqa: SIM115
+
+
 def _arg_value(flag: str) -> str | None:
     """--flag value from sys.argv, or None when absent."""
     if flag in sys.argv:
@@ -107,6 +118,9 @@ def _start_server(port: int) -> None:
         http="h11",
         ws="none",
         log_level="warning",
+        # Windowed frozen builds have no console to colourize (and a None
+        # stdout for uvicorn to probe) — keep the formatter plain.
+        use_colors=False,
     )
     threading.Thread(target=uvicorn.Server(config).run, daemon=True).start()
 
@@ -130,6 +144,7 @@ def _open_window(url: str) -> None:
 
 
 def main() -> None:
+    _fix_windowed_stdio()
     data_dir = _setup_environment()
     frontend = _frontend_dir()
     if frontend:

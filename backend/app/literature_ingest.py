@@ -84,10 +84,14 @@ def _get_converter():
     with _converter_lock:
         if _converter is None:
             from docling.datamodel.base_models import InputFormat
-            from docling.datamodel.pipeline_options import PdfPipelineOptions
+            from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions
             from docling.document_converter import DocumentConverter, PdfFormatOption
 
             pdf_opts = PdfPipelineOptions()
+            # The default onnxruntime backend is not installed (docling-slim
+            # doesn't pull it), so scanned pages would fail OCR at runtime.
+            # The torch backend reuses the already-bundled torch + .pth models.
+            pdf_opts.ocr_options = RapidOcrOptions(backend="torch")
             pdf_opts.generate_picture_images = True  # extract figure images
             pdf_opts.images_scale = 2.0  # ~144 dpi — legible for vision models
             _converter = DocumentConverter(

@@ -50,10 +50,10 @@ sidecar as-is.
 |---|---|
 | `backend/app/desktop.py` | Desktop entry point: resolve the per-user data dir → set env vars → start uvicorn (free port, asyncio/h11 to avoid frozen-build hidden imports) → open webview/browser. `--server-only` runs headless (tests/CI smoke); `--port N` pins the port |
 | `backend/app/main.py` | ① Serves the frontend same-origin when `GITESSAY_FRONTEND_BUILD` is set (mounted after the `/api` routers; the docker path is unaffected); ② auto-resumes interrupted literature parses/summaries at startup (with a crash-loop guard) and sweeps orphan literature dirs |
-| `backend/desktop_main.py` + `backend/desktop.spec` | PyInstaller entry and packaging config (onedir, `collect_all(docling…, rapidocr)`, no UPX to reduce antivirus false positives) |
+| `backend/desktop_main.py` + `backend/desktop.spec` | PyInstaller entry and packaging config (onedir, `collect_all(docling…, rapidocr)`, `strip=True`, torch test/bin payload dropped, no UPX to reduce antivirus false positives) |
 | `backend/pyproject.toml` | `desktop` dependency group (platformdirs / pywebview / pyinstaller) — `uv sync --group desktop` |
 | `scripts/build_desktop.py` | The single build entry point for local AND CI: frontend build → deps → PyInstaller → smoke test → versioned archive + SHA256 |
-| `.github/workflows/desktop.yml` | Four-platform CI matrix (PyInstaller can't cross-compile, so each OS builds its own bundle) that calls the same script; publishes a GitHub Release on `v*` tags |
+| `.github/workflows/desktop.yml` | Three-platform CI matrix (PyInstaller can't cross-compile, so each OS builds its own bundle) that calls the same script; publishes a GitHub Release on `v*` tags |
 
 ## Data locations
 
@@ -87,11 +87,12 @@ py -3 scripts\build_desktop.py                    # the Windows equivalent
 # Version: --version flag > GITESSAY_VERSION env > git describe > dev
 ```
 
-The four platform bundles (linux-x64 / windows-x64 / macos-arm64 / macos-x64)
-are built by `.github/workflows/desktop.yml` — CI invokes the **same**
+The platform bundles (linux-x64 / windows-x64 / macos-arm64 — Apple Silicon
+only, Intel Macs are not a target) are built by
+`.github/workflows/desktop.yml` — CI invokes the **same**
 `scripts/build_desktop.py` and only adds system dependencies, npm/uv caching,
 and artifact upload. Pushing a `v*` tag creates a GitHub Release with all
-four archives and their checksums.
+archives and their checksums.
 
 ## Risks and caveats
 
@@ -101,14 +102,21 @@ four archives and their checksums.
    fails at runtime with `FileNotFoundError`. Watch for the same class of
    issue when adding parsing dependencies.
 1. **Size**: the torch(CPU) + docling + opencv chain sets the floor at ~1 GB
-   (measured: 1.4 GB onedir, ~514 MB as tar.gz). That's the inherent cost of
-   local PDF parsing — comparable local-AI apps (e.g. Stable Diffusion
-   bundles) are in the same range. A future "slim" variant (docling as an
-   optional, on-demand download) could bring the core installer to ~150 MB.
-2. **Linux system libraries**: opencv needs `libgl1 libglib2.0-0 libxcb1`
-   (Debian/Ubuntu names) at runtime. CI installs them for the build; for
-   end-user distribution consider an AppImage bundling these, or document the
-   requirement.
+   (measured after the size trim: **981 MB onedir, ~390 MB as tar.gz**, down
+   from 1.4 GB / 514 MB). The trim: `strip=True` in the spec (~150 MB of debug
+   symbols), torch's bundled test suites/binaries dropped (~137 MB), RapidOCR
+   pinned to its **torch backend** (the default onnxruntime backend was never
+   installed, so scanned-PDF OCR would have crashed — and the now-unused .onnx
+   models left the bundle, -31 MB), faker/polyfactory/hf_xet/zstandard._cffi
+   excluded, and byte-identical shared libraries hardlink-deduped at build
+   time. The remaining floor is the inherent cost of local PDF parsing —
+   comparable local-AI apps (e.g. Stable Diffusion bundles) are in the same
+   range. A future "slim" variant (docling as an optional, on-demand download)
+   could bring the core installer to ~150 MB.
+2. **Linux system libraries**: solved — the build uses
+   `opencv-python-headless` (same API, no Qt/libGL dependency; a uv override
+   prunes docling's transitive `opencv-python`), so the frozen app needs no
+   system X11/GL libraries beyond glibc.
 3. **First-run model download**: the first PDF parse downloads ~500 MB of
    docling layout models (stored in the data dir; offline thereafter). An
    optional alternative is warming the model cache into the package at build
