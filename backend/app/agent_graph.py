@@ -556,6 +556,38 @@ def build_graph(ctx: RunContext):
 
 
 # --- SSE bridge ------------------------------------------------------------
+def _extract_reasoning(msg) -> str:
+    """Pull a chain-of-thought delta out of a streamed model chunk.
+
+    Reasoning content arrives in provider-specific places, so check them all:
+      - OpenAI-compatible reasoning models (DeepSeek-R1, QwQ, GLM, …) stream it
+        in additional_kwargs.reasoning_content;
+      - Anthropic thinking blocks arrive as typed content parts
+        ({type: 'thinking'|'reasoning', …});
+      - some gateways surface it as a top-level attribute instead.
+    """
+    for attr in ("reasoning_content", "reasoning"):
+        val = getattr(msg, attr, None)
+        if isinstance(val, str) and val:
+            return val
+    kwargs = getattr(msg, "additional_kwargs", None) or {}
+    rc = kwargs.get("reasoning_content") or kwargs.get("reasoning")
+    if isinstance(rc, str) and rc:
+        return rc
+    if isinstance(rc, dict):  # some gateways nest {"type": ..., "text": ...}
+        text = rc.get("text") or ""
+        if isinstance(text, str) and text:
+            return text
+    content = getattr(msg, "content", None)
+    if isinstance(content, list):
+        return "".join(
+            str(b.get("thinking") or b.get("reasoning") or "")
+            for b in content
+            if isinstance(b, dict) and b.get("type") in ("thinking", "reasoning")
+        )
+    return ""
+
+
 async def run_agent_stream(req, s, db):
     """Yield normalized SSE event dicts for one agent run."""
     ctx = RunContext(db=db, settings=s, project_id=req.project_id, memory_enabled=req.memory_enabled, depth=0)
@@ -587,7 +619,7 @@ async def run_agent_stream(req, s, db):
                     )
                     if text:
                         yield {"type": "text", "delta": text}
-                reasoning = getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None)
+                reasoning = _extract_reasoning(msg)
                 if reasoning:
                     yield {"type": "thinking", "delta": reasoning}
             elif ctype == "updates":

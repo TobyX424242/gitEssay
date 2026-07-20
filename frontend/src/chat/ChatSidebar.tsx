@@ -1187,7 +1187,11 @@ function MessageBubble({
   }, [live]);
 
   const hasThinking = !!(message.thinking && message.thinking.length > 0);
-  const showThinking = live || hasThinking;
+  // Only show the Thoughts pane when the model actually produced reasoning
+  // content (reasoning models: DeepSeek-R1, o-series, …). Non-reasoning models
+  // (gpt-4o-mini etc.) emit none — an always-"…" placeholder pane looks broken;
+  // the three-dot working indicator below already covers the busy state.
+  const showThinking = hasThinking;
   const edits = message.edits ?? [];
   const isAtomicPatch = message.action?.kind === 'patch';
   const patchLabel =
@@ -1242,13 +1246,11 @@ function MessageBubble({
             aria-expanded={thinkOpen}>
             <span className="chat-thinking-chev">▸</span>
             <span className="chat-thinking-label">
-              {live && !hasThinking ? 'Thinking…' : 'Thoughts'}
+              {live ? 'Thinking…' : 'Thoughts'}
             </span>
           </button>
           {thinkOpen && (
-            <div className="chat-thinking-body">
-              {message.thinking || (live ? '…' : '')}
-            </div>
+            <div className="chat-thinking-body">{message.thinking}</div>
           )}
         </div>
       )}

@@ -234,6 +234,42 @@
   flex: none;
 }
 
+/* delete-confirm modal (reuses mem-overlay/mem-panel chrome) */
+.lit-confirm {
+  width: min(400px, 92vw);
+}
+.lit-confirm-body {
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.lit-confirm-title {
+  margin: 0 0 6px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lit-confirm-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ge-text-muted, #888);
+}
+.lit-confirm-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--ge-border, #ddd);
+}
+.lit-confirm-delete {
+  background: #d64545;
+}
+.lit-confirm-delete:hover {
+  background: #c23934;
+  filter: none;
+}
+
 .lit-retry {
   flex: none;
 }

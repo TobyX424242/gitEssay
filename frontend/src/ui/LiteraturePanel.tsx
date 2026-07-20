@@ -54,6 +54,9 @@ export default function LiteraturePanel(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  // Delete confirmation: an in-app modal (not window.confirm, which is blocked/
+  // ugly in some webviews and clashes with the app's design).
+  const [pendingDelete, setPendingDelete] = useState<Literature | null>(null);
 
   const upload = (files: FileList | File[]) => {
     if (!pid) {
@@ -70,12 +73,12 @@ export default function LiteraturePanel(): JSX.Element {
     );
   };
 
-  const onDelete = (lit: Literature) => {
-    if (
-      !window.confirm(
-        `Delete 《${lit.title}》? Its parsed chunks, figures, and attached notes are removed too.`,
-      )
-    ) {
+  const onDelete = (lit: Literature) => setPendingDelete(lit);
+
+  const confirmDelete = () => {
+    const lit = pendingDelete;
+    setPendingDelete(null);
+    if (!lit) {
       return;
     }
     deleteLiterature(lit.id).catch(e =>
@@ -210,6 +213,81 @@ export default function LiteraturePanel(): JSX.Element {
       {detailId && (
         <LiteratureDetailModal lid={detailId} onClose={() => setDetailId(null)} />
       )}
+      {pendingDelete && (
+        <DeleteConfirmModal
+          lit={pendingDelete}
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Modern in-app delete confirmation (replaces window.confirm). */
+function DeleteConfirmModal({
+  lit,
+  onConfirm,
+  onCancel,
+}: {
+  lit: Literature;
+  onConfirm: () => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const confirmRef = useRef<HTMLButtonElement | null>(null);
+
+  // Escape cancels; focus the confirm button on open for keyboard users.
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onCancel();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    confirmRef.current?.focus();
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  return (
+    <div className="mem-overlay" onClick={onCancel}>
+      <div
+        className="mem-panel lit-confirm"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label="Delete reference"
+        onClick={e => e.stopPropagation()}>
+        <header className="mem-header">
+          <span className="mem-title">Delete reference?</span>
+          <button
+            type="button"
+            className="mem-close"
+            onClick={onCancel}
+            aria-label="Cancel">
+            ✕
+          </button>
+        </header>
+        <div className="lit-confirm-body">
+          <p className="lit-confirm-title" title={lit.title}>
+            《{lit.title}》
+          </p>
+          <p className="lit-confirm-sub">
+            Its parsed chunks, figures, and attached notes are removed too. This
+            can't be undone.
+          </p>
+        </div>
+        <footer className="lit-confirm-footer">
+          <button type="button" className="cp-button cp-button--ghost" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="cp-button lit-confirm-delete"
+            ref={confirmRef}
+            onClick={onConfirm}>
+            Delete
+          </button>
+        </footer>
+      </div>
     </div>
   );
 }
@@ -224,6 +302,10 @@ function LiteratureDetailModal({
 }): JSX.Element {
   const [detail, setDetail] = useState<LiteratureDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bumped to re-run the fetch+poll effect (e.g. after Regenerate — the poll
+  // loop has already stopped by then, so without this the modal would show the
+  // stale summary until it was closed and reopened).
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Refresh while the summary is still being generated.
   useEffect(() => {
@@ -249,11 +331,15 @@ function LiteratureDetailModal({
         clearTimeout(timer);
       }
     };
-  }, [lid]);
+  }, [lid, refreshKey]);
 
   const onRegenerate = () => {
+    // Immediate feedback: flip the badge to "summarizing…" and hide the stale
+    // summary, then restart the poll loop once the backend has flipped state.
+    setDetail(d => (d ? {...d, summary_status: 'generating', summary: null} : d));
     regenerateSummary(lid)
-      .catch(e => setError(e instanceof Error ? e.message : String(e)));
+      .catch(e => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setRefreshKey(k => k + 1));
   };
 
   return (

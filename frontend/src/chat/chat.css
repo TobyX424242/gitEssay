@@ -647,10 +647,61 @@
   flex-direction: column;
   gap: 6px;
   margin-bottom: 8px;
+  counter-reset: chat-ask-option;
 }
-.chat-ask-option {
-  text-align: left;
+/* Selector specificity (.chat-ask-options .chat-ask-option = 0,2,0) beats
+   .cp-button (0,1,0) regardless of stylesheet load order — cp-button's
+   white-space: nowrap was overriding the wrap and letting long options
+   overflow the button. */
+.chat-ask-options .chat-ask-option {
+  counter-increment: chat-ask-option;
+  position: relative;
+  display: block;
   width: 100%;
+  box-sizing: border-box;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-align: left;
+  line-height: 1.5;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 8px 12px 8px 36px;
+  border-radius: 8px;
+  border: 1px solid var(--ge-border);
+  background: var(--ge-surface-2);
+  color: var(--ge-text);
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+/* Numbered badge — every wrapped line stays aligned past the badge. */
+.chat-ask-options .chat-ask-option::before {
+  content: counter(chat-ask-option);
+  position: absolute;
+  left: 10px;
+  top: 9px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ge-accent) 14%, var(--ge-surface));
+  color: var(--ge-accent);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+}
+.chat-ask-options .chat-ask-option:hover:not(:disabled) {
+  border-color: var(--ge-accent);
+  color: var(--ge-accent);
+  background: color-mix(in srgb, var(--ge-accent) 7%, var(--ge-surface));
+  filter: none;
+}
+.chat-ask-options .chat-ask-option:hover:not(:disabled)::before {
+  background: var(--ge-accent);
+  color: #fff;
+}
+.chat-ask-options .chat-ask-option:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 .chat-ask-freeform {
   display: flex;
