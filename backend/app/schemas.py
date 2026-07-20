@@ -1,5 +1,5 @@
 """gitEssay backend — Pydantic request/response schemas."""
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -40,7 +40,9 @@ class CheckpointOut(BaseModel):
 class CheckpointCapture(BaseModel):
     state: dict[str, Any]
     label: Optional[str] = None
-    source: str = "manual"
+    # Mirrors the frontend's CheckpointSource union. Anything other than "auto"
+    # is treated as durable by the capture endpoint.
+    source: Literal["init", "manual", "auto", "restore", "ai-accept"] = "manual"
     skip_if_unchanged: bool = False
 
 
@@ -79,13 +81,16 @@ class MessageReplace(BaseModel):
 
 
 class EditStatePatch(BaseModel):
-    state: str
+    # Mirrors the frontend's ChatEditState union.
+    state: Literal["pending", "applied", "rejected", "unlocatable", "stale", "reverted"]
 
 
-# ---- memories (AI long-term, project-scoped notes) ------------------------
+# ---- memories (AI long-term, project/literature-scoped notes) -------------
 class MemoryOut(BaseModel):
     id: str
     project_id: str
+    literature_id: Optional[str] = None
+    literature_title: Optional[str] = None  # joined, for display
     content: str
     created_at: int
 
@@ -94,26 +99,51 @@ class MemoryOut(BaseModel):
 
 class MemoryCreate(BaseModel):
     content: str
+    literature_id: Optional[str] = None  # NULL = project-wide note
+
+
+# ---- literature (uploaded references: PDF/DOCX → chunks/images) -----------
+class LiteratureOut(BaseModel):
+    id: str
+    project_id: str
+    filename: str
+    title: str
+    status: str  # processing | ready | error
+    error: Optional[str] = None
+    page_count: int
+    char_count: int
+    chunk_count: int
+    image_count: int
+    note_count: int = 0
+    # AI summary lifecycle: none → generating → ready | failed | skipped
+    summary_status: str = "none"
+    # Embedding indexing outcome: none | disabled (no model configured) | ok |
+    # failed (keyword search only)
+    embed_status: str = "none"
+    # Parse progress 0..1 while processing (PDFs); null = indeterminate
+    progress: Optional[float] = None
+    created_at: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LiteratureImageOut(BaseModel):
+    id: str
+    seq: int
+    caption: str
+    width: int
+    height: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LiteratureDetail(LiteratureOut):
+    images: list[LiteratureImageOut] = []
+    outline: list[str] = []  # distinct chunk headings, in document order
+    summary: Optional[str] = None
 
 
 # ---- AI -------------------------------------------------------------------
-class ChatRequest(BaseModel):
-    system: str
-    user: str
-
-
-class ChatResponse(BaseModel):
-    content: str
-
-
-class ChatStreamRequest(BaseModel):
-    """Multi-turn streaming chat. `messages` is an OpenAI-style
-    [{role: 'user'|'assistant', content: str}] array — tool results are framed
-    as user turns by the frontend, so the same shape serves both providers."""
-    system: str
-    messages: list[dict[str, Any]]
-
-
 class AISettingsOut(BaseModel):
     provider_format: str
     base_url: str
@@ -121,18 +151,25 @@ class AISettingsOut(BaseModel):
     temperature: float
     max_input_tokens: int
     max_output_tokens: int
+    vision_capable: bool
+    embedding_model: str
     has_key: bool
     api_key: str = ""  # masked — empty unless a key is set
 
 
 class AISettingsIn(BaseModel):
-    provider_format: Optional[str] = None
+    # Anything not exactly "anthropic" is spoken to as OpenAI — reject typos at
+    # the door instead of silently using the wrong protocol.
+    provider_format: Optional[Literal["openai", "anthropic"]] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     model: Optional[str] = None
     temperature: Optional[float] = None
     max_input_tokens: Optional[int] = None
     max_output_tokens: Optional[int] = None
+    # User-declared model capability flags.
+    vision_capable: Optional[bool] = None
+    embedding_model: Optional[str] = None
 
 
 class TestResult(BaseModel):
@@ -147,7 +184,7 @@ class AgentRunRequest(BaseModel):
     editor; the agent reads/searches that snapshot via tools."""
     project_id: str
     instruction: str
-    mode: str = "document"  # 'selection' | 'document'
+    mode: Literal["selection", "document"] = "document"
     selection_text: str = ""
     doc_paragraphs: list[str]
     history: list[dict[str, Any]] = []  # [{role: 'user'|'assistant', content: str}]

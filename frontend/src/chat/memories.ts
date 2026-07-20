@@ -3,9 +3,10 @@
  * project) + the user-facing enable/disable toggle.
  *
  * The notes themselves are stored backend-side (`/api/projects/{pid}/memories`)
- * and injected into the agent's system prompt by runAgent. Whether to use memory
- * at all is a user preference kept in localStorage (the backend just stores and
- * serves notes; the frontend gates injection + the `remember` action on this flag).
+ * and injected into the agent's system prompt by the LangGraph backend. Whether
+ * to use memory at all is a user preference kept in localStorage (the backend
+ * stores/serves notes and runs the `remember` tool; the toggle is forwarded as
+ * `memory_enabled` with each run).
  */
 import {useEffect, useSyncExternalStore, useState} from 'react';
 
@@ -14,6 +15,9 @@ import {api} from '../utils/api';
 export interface Memory {
   id: string;
   project_id: string;
+  /** Set when the note is scoped to one literature item (a per-paper note). */
+  literature_id: string | null;
+  literature_title: string | null;
   content: string;
   created_at: number;
 }
@@ -21,6 +25,8 @@ export interface Memory {
 interface ApiMemory {
   id: string;
   project_id: string;
+  literature_id: string | null;
+  literature_title: string | null;
   content: string;
   created_at: number;
 }

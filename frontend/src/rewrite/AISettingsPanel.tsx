@@ -8,7 +8,6 @@
 import {type JSX, useState} from 'react';
 import {createPortal} from 'react-dom';
 
-import {type AgentEngine, setAgentEngine, useAgentEngine} from '../chat/agentEngine';
 import {
   type AISettings,
   type ProviderFormat,
@@ -28,7 +27,6 @@ export default function AISettingsPanel({
   onClose: () => void;
 }): JSX.Element {
   const current = useAISettings();
-  const agentEngine = useAgentEngine();
   const [draft, setDraft] = useState<AISettings>(() => ({...current}));
   const [showKey, setShowKey] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(
@@ -168,24 +166,24 @@ export default function AISettingsPanel({
             />
           </label>
 
-          <label className="ai-field">
+          <label className="ai-field ai-field--check">
+            <input
+              type="checkbox"
+              checked={draft.visionCapable}
+              onChange={e => set('visionCapable', e.target.checked)}
+            />
             <span className="ai-label">
-              Agent engine <span className="ai-hint">experimental</span>
+              Model can see images (vision)
+              <span className="ai-hint">
+                let the agent look at figures extracted from literature
+              </span>
             </span>
-            <select
-              className="cp-input"
-              value={agentEngine}
-              onChange={e => setAgentEngine(e.target.value as AgentEngine)}>
-              <option value="frontend">Frontend loop (default)</option>
-              <option value="langgraph">LangGraph (backend)</option>
-            </select>
           </label>
-          {agentEngine === 'langgraph' && (
-            <p className="ai-note ai-note--muted">
-              The LangGraph engine needs a model/endpoint that supports tool
-              calling. If yours doesn't, switch back to Frontend loop.
-            </p>
-          )}
+
+          <p className="ai-note ai-note--muted">
+            The agent runs on the LangGraph backend and needs a model/endpoint
+            that supports tool calling.
+          </p>
 
           <button
             type="button"
@@ -197,6 +195,25 @@ export default function AISettingsPanel({
 
           {showAdvanced && (
             <div className="ai-advanced">
+              <label className="ai-field">
+                <span className="ai-label">
+                  Embedding model
+                  <span className="ai-hint">optional — semantic literature search</span>
+                </span>
+                <input
+                  className="cp-input"
+                  value={draft.embeddingModel}
+                  onChange={e => set('embeddingModel', e.target.value)}
+                  placeholder="e.g. text-embedding-3-small (blank = keyword-only)"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+              </label>
+              <p className="ai-note ai-note--muted">
+                Served from the same base URL via the OpenAI-compatible
+                /embeddings endpoint (OpenAI-format providers only). New uploads
+                are embedded automatically; leave blank for keyword-only search.
+              </p>
               <label className="ai-field">
                 <span className="ai-label">
                   Temperature <span className="ai-hint">({draft.temperature})</span>

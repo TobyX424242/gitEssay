@@ -15,6 +15,45 @@ import './CheckpointsPanel.css';
 
 type SourceFilter = 'all' | 'manual' | 'ai';
 
+/** Display name + badge modifier + no-label fallback title per source. */
+const SOURCE_META: Record<
+  Checkpoint['source'],
+  {badge: string; cls: string; untitled: string}
+> = {
+  init: {badge: 'Initial', cls: 'init', untitled: 'Initial version'},
+  manual: {badge: 'Manual', cls: 'manual', untitled: 'Manual checkpoint'},
+  auto: {badge: 'Auto-draft', cls: 'auto', untitled: 'Auto-saved draft'},
+  restore: {badge: 'Restore', cls: 'restore', untitled: 'Restored version'},
+  'ai-accept': {badge: 'AI edit', cls: 'ai', untitled: 'AI edit'},
+};
+
+/**
+ * Compact relative timestamp for the list ("2h ago") — the full locale string
+ * stays one hover away in the tooltip. Falls back to a short date past a week.
+ */
+export function relativeTime(ts: number, now: number = Date.now()): string {
+  const diff = Math.max(0, now - ts);
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) {
+    return 'just now';
+  }
+  if (mins < 60) {
+    return `${mins}m ago`;
+  }
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+  const days = Math.floor(hours / 24);
+  if (days === 1) {
+    return 'yesterday';
+  }
+  if (days < 7) {
+    return `${days}d ago`;
+  }
+  return new Date(ts).toLocaleDateString();
+}
+
 /**
  * Split `text` into plain runs + highlighted <mark> runs for each occurrence of
  * `query`. Honours the case-sensitivity flag so the highlight matches the same
@@ -194,27 +233,30 @@ export default function CheckpointsList({
         )}
         {filtered.map(cp => {
           const isCurrent = cp.id === currentId;
+          const meta = SOURCE_META[cp.source] ?? SOURCE_META.manual;
+          const absolute = new Date(cp.createdAt);
           return (
             <li
               key={cp.id}
               className={`cp-item${isCurrent ? ' cp-item--current' : ''}`}>
-              <div className="cp-meta">
-                <span className="cp-time">
-                  {new Date(cp.createdAt).toLocaleString()}
-                </span>
-                <span className="cp-source">
-                  {cp.source === 'auto'
-                    ? 'auto-draft'
-                    : cp.source === 'init'
-                      ? 'initial'
-                      : cp.source}
-                </span>
-                {cp.label && (
-                  <span className="cp-label">
-                    {' · '}
-                    {highlightMatches(cp.label, query, caseSensitive)}
+              <div className="cp-item-body">
+                <div
+                  className={`cp-item-title${cp.label ? '' : ' cp-item-title--untitled'}`}>
+                  {cp.label
+                    ? highlightMatches(cp.label, query, caseSensitive)
+                    : meta.untitled}
+                </div>
+                <div className="cp-item-sub">
+                  <span className={`cp-badge cp-badge--${meta.cls}`}>
+                    {meta.badge}
                   </span>
-                )}
+                  <time
+                    className="cp-time"
+                    dateTime={absolute.toISOString()}
+                    title={absolute.toLocaleString()}>
+                    {relativeTime(cp.createdAt)}
+                  </time>
+                </div>
               </div>
               <div className="cp-row-actions">
                 <button

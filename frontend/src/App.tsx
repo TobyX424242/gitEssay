@@ -31,6 +31,7 @@ import {type JSX, useEffect} from 'react';
 
 import {loadAISettings} from './rewrite/aiSettings';
 import {loadProjects} from './projects/projectStore';
+import LiteratureDropZone from './literature/LiteratureDropZone';
 import {ToolbarContext} from './context/ToolbarContext';
 import ChatSidebar from './chat/ChatSidebar';
 import Editor from './Editor';
@@ -133,6 +134,7 @@ export default function App(): JSX.Element {
           </div>
           <CheckpointsSidebar />
           <ChatSidebar />
+          <LiteratureDropZone />
         </CompareModeProvider>
       </ToolbarContext>
     </LexicalExtensionComposer>

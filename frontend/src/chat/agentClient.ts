@@ -1,28 +1,94 @@
 /**
- * gitEssay — LangGraph agent client (the "langgraph" engine).
+ * gitEssay — LangGraph agent client (the ONLY agent engine).
  *
- * The counterpart of `runAgent` (the frontend loop) for the backend LangGraph
- * agent. It has the SAME contract: take the run options + an onUpdate callback,
- * stream live deltas into the message bubble, and resolve to a finalized
- * ChatMessage. The produced ChatMessage is shape-identical to runAgent's, so
- * ChatSidebar / MessageBubble / acceptPatch / the ask card are unchanged — only
- * the producer differs.
+ * The backend LangGraph agent owns the loop, tools, system prompt, and
+ * memories; the frontend sends the live document snapshot (the backend has no
+ * editor) and renders the SSE events: text / thinking / step / patch / ask /
+ * done / error. The produced ChatMessage feeds ChatSidebar / MessageBubble /
+ * acceptPatch / the ask card.
  *
- * The backend owns the loop, tools, system prompt, and memories; the frontend
- * sends the live document snapshot (the backend has no editor) and renders the
- * SSE events: text / thinking / step / patch / ask / done / error.
+ * This module also hosts the shared run plumbing: docParagraphs (live editor →
+ * sentinel-laden paragraphs), messagesToHistory (stored messages → model
+ * turns), and the RunAgentOpts contract consumed by ChatSidebar.
  */
-import {docParagraphs, type RunAgentOpts} from './providers';
+import {$getRoot, type LexicalEditor} from 'lexical';
+
+import type {ChatTurn} from '../rewrite/llmClient';
+import {blockInlineItems, itemsToText} from './sentinels';
 import type {
   AgentStep,
   AssistantAction,
   ChatEditState,
   ChatMessage,
+  ChatMode,
 } from './types';
+
+export interface RunAgentOpts {
+  editor: LexicalEditor;
+  instruction: string;
+  mode: ChatMode;
+  /** selection text captured at send time (mode === 'selection'). */
+  selectionText?: string;
+  /** prior conversation turns (already mapped via messagesToHistory). */
+  history: ChatTurn[];
+  signal: AbortSignal;
+  /** live deltas for the streaming message bubble. */
+  onUpdate: (patch: Partial<ChatMessage>) => void;
+  /** Long-term memory toggle (forwarded to the backend, which owns memories). */
+  memoryEnabled: boolean;
+}
 
 /** RunAgentOpts + the project id (needed server-side for memories). */
 export interface AgentGraphOpts extends RunAgentOpts {
   projectId: string;
+}
+
+/**
+ * Flatten the live editor to a list of sentinel-laden paragraphs (citations /
+ * equations become opaque [[CITE:..]]/[[EQ:..]] tokens so the model treats them
+ * as atomic). Shipped to the backend with each run — the backend has no live
+ * editor, so the frontend must send the current document state.
+ */
+export function docParagraphs(editor: LexicalEditor): string[] {
+  let paragraphs: string[] = [];
+  editor.getEditorState().read(() => {
+    paragraphs = $getRoot()
+      .getChildren()
+      .map(b => {
+        const items = blockInlineItems(b);
+        return items.length > 0 ? itemsToText(items) : b.getTextContent();
+      });
+  });
+  return paragraphs;
+}
+
+/**
+ * Prior stored messages → the {role, content} turns sent to the model. Assistant
+ * turns carry a compact note of the action taken so the model has context across
+ * a multi-message conversation (e.g. resuming after it asked a question).
+ */
+export function messagesToHistory(messages: ChatMessage[]): ChatTurn[] {
+  return messages.map(m => {
+    if (m.role === 'user') {
+      return {role: 'user', content: m.text};
+    }
+    const parts: string[] = [];
+    if (m.text?.trim()) {
+      parts.push(m.text.trim());
+    }
+    const a = m.action;
+    if (a?.kind === 'patch') {
+      parts.push(`[Proposed ${(m.edits ?? []).length} edit(s): "${a.explanation}"]`);
+    } else if (a?.kind === 'ask') {
+      parts.push(`[Asked the user: "${a.question}"]`);
+    } else if (a?.kind === 'finish') {
+      parts.push(`[Finished: ${a.summary ?? ''}]`);
+    }
+    if (m.error) {
+      parts.push(`[Error: ${m.error}]`);
+    }
+    return {role: 'assistant', content: parts.join('\n\n') || '(no content)'};
+  });
 }
 
 interface AgentEvent {
@@ -53,8 +119,7 @@ function noOpEdits(
 
 /**
  * Run the backend LangGraph agent to completion (or abort). Returns the finalized
- * assistant message. Throws on fatal non-abort errors (caller surfaces them),
- * matching runAgent.
+ * assistant message. Throws on fatal non-abort errors (caller surfaces them).
  */
 export async function runAgentGraph(opts: AgentGraphOpts): Promise<ChatMessage> {
   const body = {
@@ -136,8 +201,7 @@ export async function runAgentGraph(opts: AgentGraphOpts): Promise<ChatMessage> 
         } else if (ev.type === 'patch') {
           const cleaned = noOpEdits(ev.edits ?? []);
           if (cleaned.length === 0) {
-            // All-no-op patch → downgrade to an advice turn (no empty card),
-            // matching runAgent.finalize (which leaves edits undefined).
+            // All-no-op patch → downgrade to an advice turn (no empty card).
             action = null;
             edits = undefined;
             if (!text.trim()) {
@@ -158,7 +222,7 @@ export async function runAgentGraph(opts: AgentGraphOpts): Promise<ChatMessage> 
           opts.onUpdate({action});
         } else if (ev.type === 'error') {
           // Keep what streamed; attach the error so the user doesn't lose the
-          // partial answer (matches runAgent's non-abort-error behavior).
+          // partial answer.
           errorMessage = ev.message ?? 'stream error';
         }
         // 'done' falls through; the reader will return done=true next.

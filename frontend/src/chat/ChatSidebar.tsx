@@ -1,8 +1,8 @@
 /**
  * gitEssay — AI chat sidebar (VS Code-style right dock).
  *
- * Always-available conversation surface. The send/retry path runs a STREAMING
- * agent (runAgent): the model's <thinking> streams into a collapsible Thoughts
+ * Always-available conversation surface. The send/retry path runs the STREAMING
+ * LangGraph agent (runAgentGraph): the model's thinking streams into a collapsible Thoughts
  * pane (expanded live, auto-collapsed when the turn finishes), and each turn ends
  * in one terminal action — patch (reviewable diffs, checkpointed on accept with
  * the model's explanation as the label), ask (options + a free-text box), or
@@ -57,11 +57,18 @@ import {
   useMemoryEnabled,
 } from './memories';
 import {useActiveProjectId} from '../projects/projectStore';
-import {runAgentGraph} from './agentClient';
-import {useAgentEngine} from './agentEngine';
-import {docParagraphs, messagesToHistory, runAgent} from './providers';
+import {useCompareMode} from '../ui/CompareMode';
+import {docParagraphs, messagesToHistory, runAgentGraph} from './agentClient';
+import {buildRetryPlan, lifoRevertSteps} from './retry';
+import type {RetryPlan} from './retry';
 import type {ChatTurn} from '../rewrite/llmClient';
-import type {ChatEditState, ChatMessage, ChatMode, MessageContext} from './types';
+import type {
+  AgentStep,
+  ChatEditState,
+  ChatMessage,
+  ChatMode,
+  MessageContext,
+} from './types';
 import {SidePanelResizer} from '../ui/SidePanelResizer';
 import {useScrollTrap} from '../ui/useScrollTrap';
 import './chat.css';
@@ -86,31 +93,78 @@ function truncate(s: string, n: number): string {
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 }
 
+/** Step-chip icon per AgentStep kind (LangGraph agent tool activity). */
+const STEP_ICON: Record<string, string> = {
+  read: '📖',
+  search: '🔍',
+  literature_list: '📚',
+  literature_search: '📚',
+  literature_read: '📄',
+  figure: '🖼',
+  notes: '🗒',
+  delegate: '🤖',
+};
+
+/** Group memory notes for the Memory panel: project-wide first, then one
+ *  section per literature item (per-paper notes the agent saved). */
+function groupMemories(
+  memories: Memory[],
+): Array<{key: string; title: string | null; notes: Memory[]}> {
+  const project = memories.filter(m => !m.literature_id);
+  const byLit = new Map<string, {title: string; notes: Memory[]}>();
+  for (const m of memories) {
+    if (!m.literature_id) {
+      continue;
+    }
+    const g = byLit.get(m.literature_id) ?? {
+      title: m.literature_title ?? 'Literature',
+      notes: [],
+    };
+    g.notes.push(m);
+    byLit.set(m.literature_id, g);
+  }
+  const groups: Array<{key: string; title: string | null; notes: Memory[]}> = [];
+  if (project.length > 0) {
+    groups.push({key: '__project__', title: null, notes: project});
+  }
+  for (const [lid, g] of byLit) {
+    groups.push({key: lid, title: g.title, notes: g.notes});
+  }
+  return groups;
+}
+
+/** Step-chip label per AgentStep kind. */
+function stepLabel(s: AgentStep): string {
+  switch (s.kind) {
+    case 'search':
+      return `searched “${s.query ?? ''}”`;
+    case 'remember':
+      return `remembered: ${s.note ?? ''}`;
+    case 'literature_list':
+      return 'listed the literature library';
+    case 'literature_search':
+      return `searched the literature for “${s.query ?? ''}”`;
+    case 'literature_read':
+      return `read 《${s.literature ?? 'literature'}》`;
+    case 'figure':
+      return `looked at figure ${s.query ?? ''} of 《${s.literature ?? 'literature'}》`;
+    case 'notes':
+      return 'consulted long-term notes';
+    case 'delegate': {
+      const layer = s.depth ? ` (layer ${s.depth + 1})` : '';
+      return `dispatched a subagent${layer}: ${s.task ?? ''}`;
+    }
+    case 'read':
+    default:
+      return 'read the document';
+  }
+}
+
 /** Context captured at send time and stored on the user message (drives Retry). */
 type SendContext = MessageContext;
 
-/** One response whose accepted edits will be reverted before a retry. */
-interface RetryRevertItem {
-  msgId: string;
-  /** Patch explanation (the version label) — shown in the confirm dialog. */
-  label: string;
-  count: number;
-}
-
-/** A planned retry: revert a LIFO batch of accepted patches, then regenerate. */
-interface PendingRetry {
-  convId: string;
-  targetId: string;
-  instruction: string;
-  mode: ChatMode;
-  selectionText?: string;
-  priorMessages: ChatMessage[];
-  /** Snapshot at click time — edits still carry the 'applied' state to revert. */
-  messages: ChatMessage[];
-  /** Chronological (target → latest); doRetry reverses this for LIFO undo. */
-  items: RetryRevertItem[];
-  totalEdits: number;
-}
+/** A retry plan plus the conversation it belongs to (dialog state). */
+type PendingRetry = RetryPlan & {convId: string};
 
 export default function ChatSidebar(): JSX.Element {
   const [editor] = useLexicalComposerContext();
@@ -123,7 +177,10 @@ export default function ChatSidebar(): JSX.Element {
   const messages = active?.messages ?? [];
   const memories = useMemories(activeProjectId);
   const memoryEnabled = useMemoryEnabled();
-  const agentEngine = useAgentEngine();
+  // Compare mode only sets `editor.setEditable(false)` — programmatic
+  // `editor.update` (accept / retry-revert) would still mutate the live doc
+  // underneath the frozen diff view. Mutations must bail out while it's on.
+  const {active: compareActive} = useCompareMode();
 
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState<ChatMessage | null>(null);
@@ -192,9 +249,12 @@ export default function ChatSidebar(): JSX.Element {
   // fresh send has a brand-new id and renders at the end as usual.
   const streamingInPlace = !!streaming && messages.some(m => m.id === streaming.id);
 
-  // Clear the pin when switching conversations so a stale target doesn't pin.
+  // Clear the pin AND any pending retry plan when switching conversations so a
+  // stale target doesn't pin and a stale plan doesn't revert/persist against the
+  // wrong conversation.
   useEffect(() => {
     pinnedIdRef.current = null;
+    setPendingRetry(null);
   }, [active?.id]);
 
   // Keep the newest content in view. A fresh send scrolls to the bottom; a retry
@@ -292,13 +352,9 @@ export default function ChatSidebar(): JSX.Element {
         mode: args.mode,
         selectionText: args.selectionText,
         signal: controller.signal,
+        // Long-term memory is owned by the backend (it runs the remember tool);
+        // the frontend only forwards the on/off toggle.
         memoryEnabled,
-        memories: memories.map(m => ({content: m.content})),
-        onRemember: async (note: string) => {
-          if (activeProjectId) {
-            await addMemory(activeProjectId, note);
-          }
-        },
         onUpdate: (patch: Partial<ChatMessage>) =>
           setStreaming(s => (s && s.id === args.streamingId ? {...s, ...patch} : s)),
       };
@@ -312,26 +368,45 @@ export default function ChatSidebar(): JSX.Element {
             : s,
         );
         const opts = {...runOptsBase, history: h, instruction: instr};
-        return agentEngine === 'langgraph'
-          ? runAgentGraph({...opts, projectId: activeProjectId ?? ''})
-          : runAgent(opts);
+        return runAgentGraph({...opts, projectId: activeProjectId ?? ''});
       };
 
       // Multi-layer fallback: validate the patch the AI produced; re-prompt on a
-      // mis-copy (bounded), or mark it failed if the doc changed under the AI.
+      // mis-copy (bounded), or mark it failed if the doc changed under the AI or
+      // the edit is structurally invalid.
       let attempts = 0;
-      const finalize = (msg: ChatMessage): Promise<ChatMessage> => {
+      const finalize = (
+        msg: ChatMessage,
+        accHistory: ChatTurn[],
+        prevInstruction: string,
+      ): Promise<ChatMessage> => {
+        // A non-abort backend error already carries msg.error — preserve it and
+        // don't classify/re-prompt (would waste calls at a failing backend and
+        // surface a misleading 'ignored' card).
+        if (msg.error) {
+          return Promise.resolve(msg);
+        }
+        // User stopped mid-run: keep whatever streamed. Attach the snapshot for a
+        // patch so a later Accept can still classify not-found→stale. Checked
+        // before classifying so an aborted half-baked patch isn't mislabeled.
+        if (controller.signal.aborted) {
+          return Promise.resolve(
+            msg.action?.kind === 'patch' ? {...msg, snapshot} : msg,
+          );
+        }
         if (msg.action?.kind === 'patch' && msg.edits && msg.edits.length > 0) {
-          const issue = classifyPatch(editor, msg.edits, snapshot);
+          const {issue, reason} = classifyPatch(editor, msg.edits, snapshot);
           if (issue === 'stale') {
             // The passage the AI was editing is gone from the live doc — the doc
             // changed while it worked. The patch can't complete; tell the user.
             return Promise.resolve(withPatchFailure(msg, 'stale', snapshot));
           }
+          if (issue === 'invalid') {
+            // Structurally un-applicable (sentinel/structure). Re-prompting won't
+            // reliably fix it; fail the patch with the specific reason.
+            return Promise.resolve(withPatchFailure(msg, 'invalid', snapshot, reason));
+          }
           if (issue === 'mis-copy') {
-            if (controller.signal.aborted) {
-              return Promise.resolve(msg); // user stopped — keep the partial
-            }
             attempts += 1;
             if (attempts > MAX_PATCH_ATTEMPTS) {
               return Promise.resolve(withPatchFailure(msg, 'ignored', snapshot));
@@ -340,12 +415,17 @@ export default function ChatSidebar(): JSX.Element {
             // copy the SEARCH text verbatim, then re-validate the new patch.
             const failedText =
               msg.text?.trim() || '(proposed a patch that did not match the document)';
-            const retryHistory: ChatTurn[] = [
-              ...history,
-              {role: 'user', content: args.instruction},
+            const feedback = patchFeedback(msg.edits);
+            // Accumulate every prior attempt so the model sees all failures (not
+            // just the latest) and doesn't rotate back to a known-bad transcription.
+            const nextHistory: ChatTurn[] = [
+              ...accHistory,
+              {role: 'user', content: prevInstruction},
               {role: 'assistant', content: failedText},
             ];
-            return runOnce(retryHistory, patchFeedback(msg.edits)).then(finalize);
+            return runOnce(nextHistory, feedback).then(m =>
+              finalize(m, nextHistory, feedback),
+            );
           }
         }
         // ok (or a non-patch reply): attach the snapshot for apply-time checks.
@@ -355,13 +435,17 @@ export default function ChatSidebar(): JSX.Element {
       };
 
       runOnce(history, args.instruction)
-        .then(finalize)
-        .then((finalMsg: ChatMessage) => {
+        .then(m => finalize(m, history, args.instruction))
+        .then(async (finalMsg: ChatMessage) => {
           const persisted: ChatMessage = {...finalMsg, id: args.streamingId};
+          // Await the persist so the store holds the new message BEFORE we drop
+          // the live streaming bubble — otherwise the non-optimistic refetch
+          // leaves the OLD (pre-retry) message visible for a frame (a flicker)
+          // on an in-place retry.
           if (args.replace) {
-            void replaceMessage(args.convId, args.streamingId, persisted);
+            await replaceMessage(args.convId, args.streamingId, persisted);
           } else {
-            void appendMessages(args.convId, [persisted]);
+            await appendMessages(args.convId, [persisted]);
           }
         })
         .catch((err: unknown) => {
@@ -385,13 +469,13 @@ export default function ChatSidebar(): JSX.Element {
           abortRef.current = null;
         });
     },
-    [activeProjectId, agentEngine, configured, editor, memories, memoryEnabled],
+    [activeProjectId, configured, editor, memories, memoryEnabled],
   );
 
   const send = useCallback(
     (instruction?: string) => {
       const text = (instruction ?? input).trim();
-      if (!text || loading || !active) {
+      if (!text || loading || !active || pendingRetry || acceptingRef.current) {
         return;
       }
       const convId = active.id;
@@ -418,7 +502,7 @@ export default function ChatSidebar(): JSX.Element {
         replace: false,
       });
     },
-    [active, captureSelection, input, loading, startRun],
+    [active, captureSelection, input, loading, pendingRetry, startRun],
   );
 
   /**
@@ -432,41 +516,18 @@ export default function ChatSidebar(): JSX.Element {
       if (!active || loading || acceptingRef.current) {
         return null;
       }
-      const convId = active.id;
-      const msgs = active.messages;
-      const idx = msgs.findIndex(m => m.id === assistantId);
-      if (idx < 1) {
+      if (compareActive) {
+        // Retry reverts applied patches — a live-doc mutation.
+        setNotice({
+          text: 'Exit the checkpoint comparison before retrying — retrying reverts edits in the live document.',
+          key: Date.now(),
+        });
         return null;
       }
-      const userMsg = msgs[idx - 1];
-      if (userMsg.role !== 'user') {
-        return null;
-      }
-      const ctx: SendContext = userMsg.context ?? {mode: 'document'};
-      const items: RetryRevertItem[] = [];
-      for (let k = idx; k < msgs.length; k++) {
-        const m = msgs[k];
-        if (m.role !== 'assistant' || m.action?.kind !== 'patch') {
-          continue;
-        }
-        const count = (m.edits ?? []).filter(e => e.state === 'applied').length;
-        if (count > 0) {
-          items.push({msgId: m.id, label: m.action.explanation || 'AI edit', count});
-        }
-      }
-      return {
-        convId,
-        targetId: assistantId,
-        instruction: userMsg.text,
-        mode: ctx.mode,
-        selectionText: ctx.selectionText,
-        priorMessages: msgs.slice(0, idx - 1),
-        messages: msgs,
-        items,
-        totalEdits: items.reduce((n, it) => n + it.count, 0),
-      };
+      const plan = buildRetryPlan(active.messages, assistantId);
+      return plan ? {convId: active.id, ...plan} : null;
     },
-    [active, loading],
+    [active, loading, compareActive],
   );
 
   /**
@@ -479,23 +540,24 @@ export default function ChatSidebar(): JSX.Element {
       acceptingRef.current = true;
       let undone = 0;
       let failed = 0;
+      let nonRevertable = 0;
+      let revertErrored = false;
       try {
-        for (const it of [...plan.items].reverse()) {
-          const msg = plan.messages.find(m => m.id === it.msgId);
-          if (!msg) {
+        for (const step of lifoRevertSteps(plan)) {
+          const e = step.edit;
+          if (e.replace.trim() === '') {
+            // Deletions can't be reverse-swapped (the swap searches for the
+            // empty replace text). Re-inserting deleted text needs its original
+            // position, which we don't track — skip and surface below.
+            nonRevertable++;
             continue;
           }
-          const applied = (msg.edits ?? [])
-            .map((e, i) => ({e, i}))
-            .filter(({e}) => e.state === 'applied');
-          for (const {e, i} of [...applied].reverse()) {
-            const res = await applyTextPatch(editor, e.replace, e.search); // reverse swap
-            if (res.ok) {
-              undone++;
-              await setEditState(plan.convId, it.msgId, i, 'reverted');
-            } else {
-              failed++;
-            }
+          const res = await applyTextPatch(editor, e.replace, e.search); // reverse swap
+          if (res.ok) {
+            undone++;
+            await setEditState(plan.convId, step.msgId, step.editIndex, 'reverted');
+          } else {
+            failed++;
           }
         }
         if (undone > 0) {
@@ -507,12 +569,31 @@ export default function ChatSidebar(): JSX.Element {
             label: `Reverted ${undone} edit${undone === 1 ? '' : 's'} before retry: ${truncate(label, 60)}`,
           });
         }
+      } catch (err) {
+        // applyTextPatch / setEditState / captureCheckpoint can reject — don't let
+        // it become an unhandled rejection (`void doRetry`). Retry against the
+        // current doc either way.
+        revertErrored = true;
+        setNotice({
+          text: `⚠ Revert failed: ${
+            err instanceof Error ? err.message : String(err)
+          }. Retrying against the current document.`,
+          key: Date.now(),
+        });
       } finally {
         acceptingRef.current = false;
       }
 
-      if (plan.totalEdits > 0) {
-        if (failed === 0) {
+      if (!revertErrored && plan.totalEdits > 0) {
+        const skippedDetail = [
+          failed > 0 ? `${failed} couldn't be located (the document changed)` : '',
+          nonRevertable > 0
+            ? `${nonRevertable} deletion${nonRevertable === 1 ? '' : 's'} couldn't be auto-reverted (re-inserting deleted text isn't supported)`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('; ');
+        if (skippedDetail === '') {
           setNotice({
             text: `↩ Reverted ${undone} accepted edit${
               undone === 1 ? '' : 's'
@@ -525,12 +606,12 @@ export default function ChatSidebar(): JSX.Element {
           setNotice({
             text: `↩ Reverted ${undone} of ${plan.totalEdits} edit${
               plan.totalEdits === 1 ? '' : 's'
-            }; ${failed} couldn't be located (the document changed). Retrying anyway — the new patch may not apply to those parts.`,
+            }; ${skippedDetail}. Retrying anyway against the current doc — the new patch may not apply to those parts.`,
             key: Date.now(),
           });
         } else {
           setNotice({
-            text: "Couldn't auto-revert the edit(s) (the document has changed since). Retrying anyway — the new patch may not apply.",
+            text: `Couldn't auto-revert the edit(s) (${skippedDetail}). Retrying anyway — the new patch may not apply.`,
             key: Date.now(),
           });
         }
@@ -576,6 +657,25 @@ export default function ChatSidebar(): JSX.Element {
 
   const cancelRetry = useCallback(() => setPendingRetry(null), []);
 
+  // Retry-confirm modal a11y: Escape cancels, and focus the confirm button on
+  // open so keyboard users aren't left on the (still-operable) dock behind the
+  // overlay. (The overlay has no focus trap; F1 + the send() guard are the real
+  // guards against operating the dock while the dialog is open.)
+  const confirmRetryBtnRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!pendingRetry) {
+      return;
+    }
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        cancelRetry();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    confirmRetryBtnRef.current?.focus();
+    return () => document.removeEventListener('keydown', onKey);
+  }, [pendingRetry, cancelRetry]);
+
   const stop = useCallback(() => {
     abortRef.current?.abort();
   }, []);
@@ -589,7 +689,16 @@ export default function ChatSidebar(): JSX.Element {
   const acceptPatch = useCallback(
     async (msgId_: string) => {
       const convId = active?.id;
-      if (!convId || acceptingRef.current) {
+      if (!convId || acceptingRef.current || loading) {
+        return;
+      }
+      if (compareActive) {
+        // Accepting applies patches to the live doc — forbidden while the
+        // frozen compare view is showing (the two would silently diverge).
+        setNotice({
+          text: 'Exit the checkpoint comparison before accepting a patch.',
+          key: Date.now(),
+        });
         return;
       }
       const msg = active.messages.find(m => m.id === msgId_);
@@ -616,11 +725,16 @@ export default function ChatSidebar(): JSX.Element {
             // snapshot and skip the revert.
             await setEditState(convId, msgId_, i, 'applied');
           } else {
-            // A failure at accept time means the doc changed since the AI proposed
-            // this (submission already filtered mis-copies). If the search WAS in
-            // the snapshot, the original text moved/changed → "stale" (the AI's
-            // task can't be completed for this edit) — surfaced distinctly.
-            const isStale = !!snapshot && textContains(snapshot, edits[i].search);
+            // Use the structured failure kind: 'not-found' means the doc changed
+            // since the AI proposed this (finalize already filtered mis-copies and
+            // invalid edits) — if the search WAS in the snapshot (per-paragraph,
+            // matching locate's per-block scope), the original text moved/changed
+            // → "stale". sentinel/structure/empty → "unlocatable" (the edit is
+            // invalid, not stale — don't claim the doc changed).
+            const isStale =
+              res.kind === 'not-found' &&
+              !!snapshot &&
+              snapshot.split(/\n\s*\n/).some(p => textContains(p, edits[i].search));
             await setEditState(convId, msgId_, i, isStale ? 'stale' : 'unlocatable');
             if (isStale) {
               staleCount++;
@@ -639,11 +753,20 @@ export default function ChatSidebar(): JSX.Element {
             key: Date.now(),
           });
         }
+      } catch (err) {
+        // applyTextPatch / setEditState / captureCheckpoint can reject (backend
+        // down, editor error). Don't let it become an unhandled rejection.
+        setNotice({
+          text: `⚠ Accept failed: ${
+            err instanceof Error ? err.message : String(err)
+          }. Some edits may not have been applied.`,
+          key: Date.now(),
+        });
       } finally {
         acceptingRef.current = false;
       }
     },
-    [active, editor],
+    [active, editor, loading, compareActive],
   );
 
   /** Reject a single edit within a patch (prune it before the action-level Accept). */
@@ -710,7 +833,7 @@ export default function ChatSidebar(): JSX.Element {
       ? `Selection · ${selInfo.chars} chars`
       : 'Full document';
 
-  const sendDisabled = !input.trim() || loading || !active;
+  const sendDisabled = !input.trim() || loading || !active || !!pendingRetry;
 
   return (
     <>
@@ -896,6 +1019,7 @@ export default function ChatSidebar(): JSX.Element {
                     <button
                       type="button"
                       className="cp-button"
+                      ref={confirmRetryBtnRef}
                       onClick={confirmRetry}>
                       Revert &amp; retry
                     </button>
@@ -1054,6 +1178,13 @@ function MessageBubble({
   // Thoughts pane: open while streaming, collapsed once finalized (VS Code-style).
   const [thinkOpen, setThinkOpen] = useState(live);
   const [askText, setAskText] = useState('');
+  // An in-place retry reuses this instance (same key), so `live` transitions
+  // false→true without remounting — re-open the pane when it goes live.
+  useEffect(() => {
+    if (live) {
+      setThinkOpen(true);
+    }
+  }, [live]);
 
   const hasThinking = !!(message.thinking && message.thinking.length > 0);
   const showThinking = live || hasThinking;
@@ -1123,19 +1254,14 @@ function MessageBubble({
       )}
 
       {(message.steps ?? []).map(s => (
-        <div className="chat-step" key={s.at}>
+        <div
+          className={`chat-step${s.depth ? ` chat-step--nested` : ''}`}
+          key={s.at}
+          style={s.depth ? {marginLeft: Math.min(s.depth, 3) * 14} : undefined}>
           {s.kind !== 'remember' && (
-            <span className="chat-step-icon">
-              {s.kind === 'search' ? '🔍' : '📖'}
-            </span>
+            <span className="chat-step-icon">{STEP_ICON[s.kind] ?? '🔧'}</span>
           )}
-          <span className="chat-step-text">
-            {s.kind === 'search'
-              ? `searched “${s.query ?? ''}”`
-              : s.kind === 'remember'
-                ? `remembered: ${s.note ?? ''}`
-                : 'read the document'}
-          </span>
+          <span className="chat-step-text">{stepLabel(s)}</span>
           {s.hits !== undefined && (
             <span className="chat-step-hits">
               {s.hits}
@@ -1154,7 +1280,11 @@ function MessageBubble({
         <div className="chat-bubble chat-bubble--assistant chat-patch-failure">
           {message.patchFailure === 'stale'
             ? '⚠ This edit couldn’t be applied — the original text changed while the AI was working, so the task can’t be completed.'
-            : `⚠ Patch skipped — couldn’t produce a matching edit after ${MAX_PATCH_ATTEMPTS} attempts. Try rephrasing or re-send.`}
+            : message.patchFailure === 'invalid'
+              ? `⚠ This edit can’t be applied as proposed${
+                  message.patchFailureReason ? ` — ${message.patchFailureReason}` : ''
+                }. Try rephrasing or re-send.`
+              : `⚠ Patch skipped — couldn’t produce a matching edit after ${MAX_PATCH_ATTEMPTS} attempts. Try rephrasing or re-send.`}
         </div>
       )}
       {message.error ? (
@@ -1191,6 +1321,7 @@ function MessageBubble({
                       <button
                         type="button"
                         className="cp-button"
+                        disabled={busy}
                         onClick={() =>
                           onAcceptEditLegacy(i, e, patchLabel ?? 'AI chat edit')
                         }>
@@ -1238,7 +1369,11 @@ function MessageBubble({
               checkpoint for the whole justification. */}
           {isAtomicPatch && hasPendingEdit && (
             <div className="chat-edit-action-footer">
-              <button type="button" className="cp-button" onClick={onAcceptPatch}>
+              <button
+                type="button"
+                className="cp-button"
+                disabled={busy}
+                onClick={onAcceptPatch}>
                 Accept {pendingEditCount} edit{pendingEditCount === 1 ? '' : 's'}
               </button>
             </div>
@@ -1399,20 +1534,30 @@ function MemoryPanel({
           {memories.length === 0 && (
             <div className="mem-empty">
               No notes yet. When memory is on, the AI saves important project
-              context here as it works.
+              context here as it works — including per-paper notes for uploaded
+              literature.
             </div>
           )}
-          {memories.map(m => (
-            <div className="mem-item" key={m.id}>
-              <div className="mem-item-body">{m.content}</div>
-              <button
-                type="button"
-                className="mem-item-del"
-                title="Delete note"
-                aria-label="Delete note"
-                onClick={() => void deleteMemory(m.id)}>
-                ✕
-              </button>
+          {groupMemories(memories).map(group => (
+            <div className="mem-group" key={group.key}>
+              {group.title !== null && (
+                <div className="mem-group-title" title={group.title}>
+                  📄 {group.title}
+                </div>
+              )}
+              {group.notes.map(m => (
+                <div className="mem-item" key={m.id}>
+                  <div className="mem-item-body">{m.content}</div>
+                  <button
+                    type="button"
+                    className="mem-item-del"
+                    title="Delete note"
+                    aria-label="Delete note"
+                    onClick={() => void deleteMemory(m.id)}>
+                    ✕
+                  </button>
+                </div>
+              ))}
             </div>
           ))}
         </div>

@@ -1,0 +1,327 @@
+/* gitEssay — Literature panel (left dock tab). */
+.lit-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  padding: 10px;
+  box-sizing: border-box;
+}
+.lit-panel.is-dragover {
+  outline: 2px dashed var(--ge-primary, #5b7fff);
+  outline-offset: -6px;
+}
+.lit-toolbar {
+  display: flex;
+  gap: 8px;
+}
+/* Persistent dashed drop hint — makes drag-and-drop discoverable. The whole
+   area is also a click-to-browse button. */
+.lit-dropzone {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  box-sizing: border-box;
+  border: 1.5px dashed var(--ge-border, #ccc);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.lit-dropzone:hover,
+.lit-dropzone.is-dragover {
+  border-color: var(--ge-primary, #5b7fff);
+  background: rgba(91, 127, 255, 0.07);
+}
+.lit-dropzone:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.lit-dropzone-icon {
+  font-size: 20px;
+  flex: none;
+}
+.lit-dropzone-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.lit-dropzone-sub {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.65;
+}
+.lit-note {
+  font-size: 12px;
+  opacity: 0.75;
+}
+.lit-note--error {
+  color: #b3261e;
+  opacity: 1;
+}
+.lit-empty {
+  font-size: 13px;
+  line-height: 1.5;
+  opacity: 0.65;
+  padding: 12px 4px;
+}
+.lit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lit-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--ge-border, #ddd);
+  border-radius: 8px;
+}
+.lit-item-body {
+  flex: 1;
+  min-width: 0;
+  /* it's a <button> — reset chrome styles, keep it looking like a row */
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lit-item-body:hover .lit-item-title {
+  text-decoration: underline;
+}
+.lit-upload {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.lit-upload-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+.lit-progress {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ge-border, #ddd);
+  overflow: hidden;
+}
+.lit-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ge-primary, #5b7fff);
+  transition: width 0.15s ease-out;
+}
+
+/* detail modal (reuses mem-overlay/mem-panel chrome) */
+.lit-detail {
+  width: min(640px, 92vw);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+}
+.lit-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.lit-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+.lit-detail-heading {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ge-text-muted, #888);
+  margin-bottom: 6px;
+}
+.lit-summary {
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.lit-outline {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  opacity: 0.85;
+}
+.lit-detail-footer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--ge-border, #ddd);
+}
+.lit-detail-footer .cp-button {
+  text-decoration: none;
+}
+.lit-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lit-item-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.8;
+}
+.lit-item-error {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #b3261e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lit-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.lit-badge--ready {
+  background: rgba(86, 200, 130, 0.2);
+  color: #1d5135;
+}
+.lit-badge--processing {
+  background: rgba(255, 180, 60, 0.25);
+  color: #7a4d00;
+  animation: lit-pulse 1.2s ease-in-out infinite;
+}
+.lit-badge--error {
+  background: rgba(230, 96, 96, 0.2);
+  color: #6e1f1f;
+}
+.lit-delete {
+  flex: none;
+}
+
+.lit-retry {
+  flex: none;
+}
+.lit-drop-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+}
+[data-theme='dark'] .lit-drop-hint {
+  background: rgba(20, 20, 20, 0.7);
+}
+[data-theme='dark'] .lit-badge--ready {
+  color: #9fe6b8;
+}
+[data-theme='dark'] .lit-badge--error {
+  color: #f0a9a9;
+}
+@keyframes lit-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* upload/parse percentage label */
+.lit-progress-pct {
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+  min-width: 34px;
+  text-align: right;
+}
+.lit-progress--parse {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-top: 6px;
+  height: 8px;
+  flex: 1;
+}
+.lit-progress--parse .lit-progress-fill {
+  height: 100%;
+}
+.lit-progress--parse .lit-progress-pct {
+  position: absolute;
+  right: 2px;
+  top: -14px;
+  min-width: 0;
+}
+.lit-progress-fill--indet {
+  width: 40% !important;
+  animation: lit-indet 1.2s ease-in-out infinite;
+}
+@keyframes lit-indet {
+  0% {
+    margin-left: 0;
+  }
+  50% {
+    margin-left: 60%;
+  }
+  100% {
+    margin-left: 0;
+  }
+}
+
+/* full-screen drop overlay (global drag-and-drop upload) */
+.lit-global-drop {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(91, 127, 255, 0.12);
+  border: 3px dashed var(--ge-primary, #5b7fff);
+  pointer-events: none;
+}
+.lit-global-drop-card {
+  font-size: 18px;
+  font-weight: 600;
+  padding: 18px 28px;
+  border-radius: 12px;
+  background: var(--ge-surface, #fff);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+}

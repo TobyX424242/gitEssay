@@ -1,9 +1,7 @@
 """gitEssay backend — ORM models (SQLAlchemy)."""
-import json
 import time
 import uuid
-
-from sqlalchemy import Column, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, Float, ForeignKey, Integer, String, Text
 
 from app.db import Base
 
@@ -81,14 +79,84 @@ class Memory(Base):
     """AI's long-term, project-scoped notes — things it wants to remember about
     this project across conversations. Injected into the agent's context when the
     user has long-term memory enabled; the agent can add notes via the `remember`
-    action."""
+    action.
+
+    `literature_id` is NULL for project-wide notes; when set, the note is scoped
+    to one literature item (the agent's per-paper reading notes) and is injected
+    into subagent context for that paper instead of the main prompt."""
     __tablename__ = "memories"
     id = Column(String, primary_key=True)
     project_id = Column(
         String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    literature_id = Column(
+        String, ForeignKey("literature.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     content = Column(Text, nullable=False)
     created_at = Column(Integer, nullable=False, default=now_ms, index=True)
+
+
+class Literature(Base):
+    """One uploaded reference document (PDF/DOCX) parsed by docling.
+
+    The original file and extracted images live on disk under
+    <DATA_DIR>/literature/{id}/ (see literature_ingest); this row tracks the
+    parse status and denormalized counts. status: processing → ready | error."""
+    __tablename__ = "literature"
+    id = Column(String, primary_key=True)
+    project_id = Column(
+        String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    filename = Column(String, nullable=False)
+    title = Column(String, nullable=False, default="")
+    status = Column(String, nullable=False, default="processing")
+    error = Column(Text, nullable=True)
+    # Crash-loop guard: each ingest run increments this; startup auto-resume
+    # gives up after a couple of attempts (manual reparse resets it to 0).
+    parse_attempts = Column(Integer, nullable=False, default=0)
+    # Embedding indexing outcome: none (not parsed yet) | disabled (no model
+    # configured) | ok | failed (keyword search only).
+    embed_status = Column(String, nullable=False, default="none")
+    # AI-generated summary (map-reduce over chunks, see literature_summary.py).
+    # summary_status: none → generating → ready | failed | skipped (AI unconfigured)
+    summary = Column(Text, nullable=True)
+    summary_status = Column(String, nullable=False, default="none")
+    # Parse progress 0..1 (PDFs, from per-segment conversion); NULL =
+    # indeterminate (DOCX, or not started). Meaningful only while processing.
+    progress = Column(Float, nullable=True)
+    page_count = Column(Integer, nullable=False, default=0)
+    char_count = Column(Integer, nullable=False, default=0)
+    chunk_count = Column(Integer, nullable=False, default=0)
+    image_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(Integer, nullable=False, default=now_ms, index=True)
+
+
+class LiteratureChunk(Base):
+    """A retrievable text segment of a literature item. `embedding` is a JSON
+    float array when an embedding model is configured, else NULL (FTS-only)."""
+    __tablename__ = "literature_chunks"
+    id = Column(String, primary_key=True)
+    literature_id = Column(
+        String, ForeignKey("literature.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    seq = Column(Integer, nullable=False)  # order within the document
+    heading = Column(String, nullable=False, default="")  # section path, e.g. "3.2 Methods"
+    text = Column(Text, nullable=False)
+    embedding = Column(Text, nullable=True)
+
+
+class LiteratureImage(Base):
+    """A figure/table image extracted from a literature item (docling pictures)."""
+    __tablename__ = "literature_images"
+    id = Column(String, primary_key=True)
+    literature_id = Column(
+        String, ForeignKey("literature.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    seq = Column(Integer, nullable=False)  # order within the document
+    caption = Column(String, nullable=False, default="")
+    path = Column(String, nullable=False)  # relative to DATA_DIR
+    width = Column(Integer, nullable=False, default=0)
+    height = Column(Integer, nullable=False, default=0)
 
 
 class AISettings(Base):
@@ -101,3 +169,10 @@ class AISettings(Base):
     temperature = Column(Float, nullable=False, default=0.7)
     max_input_tokens = Column(Integer, nullable=False, default=16000)
     max_output_tokens = Column(Integer, nullable=False, default=8000)
+    # User-declared model capability: may the agent send images (literature
+    # figures) to the model? Off by default — when off, read_figure returns
+    # caption/context text only.
+    vision_capable = Column(Boolean, nullable=False, default=False)
+    # Optional embedding model for semantic literature search, served from the
+    # same OpenAI-compatible base_url (/embeddings). Empty = FTS keyword-only.
+    embedding_model = Column(String, nullable=False, default="")

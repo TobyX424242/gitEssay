@@ -1,5 +1,6 @@
 """gitEssay backend — projects router."""
 import json
+import shutil
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -7,7 +8,20 @@ from sqlalchemy.orm import Session
 from app import schemas
 from app.db import get_db
 from app.deps import get_project_or_404
-from app.models import EMPTY_STATE, Checkpoint, Conversation, Project, new_id, now_ms
+from app.literature_search import delete_literature_fts
+from app.models import (
+    EMPTY_STATE,
+    Checkpoint,
+    Conversation,
+    Literature,
+    LiteratureChunk,
+    LiteratureImage,
+    Memory,
+    Project,
+    new_id,
+    now_ms,
+)
+from app.storage import literature_dir
 
 router = APIRouter(tags=["projects"])
 
@@ -67,6 +81,16 @@ def delete_project(pid: str, db: Session = Depends(get_db)):
     project = get_project_or_404(db, pid)
     db.query(Checkpoint).filter_by(project_id=pid).delete()
     db.query(Conversation).filter_by(project_id=pid).delete()
+    # Memory too — don't rely on the FK-cascade PRAGMA for one child table while
+    # deleting the others explicitly (an orphan Memory row if the PRAGMA fails).
+    db.query(Memory).filter_by(project_id=pid).delete()
+    # Literature: child tables + FTS rows + on-disk files per item.
+    for lit in db.query(Literature).filter_by(project_id=pid).all():
+        db.query(LiteratureChunk).filter_by(literature_id=lit.id).delete()
+        db.query(LiteratureImage).filter_by(literature_id=lit.id).delete()
+        delete_literature_fts(db, lit.id)
+        shutil.rmtree(literature_dir(lit.id), ignore_errors=True)
+        db.delete(lit)
     db.delete(project)
     db.commit()
     return {"ok": True}

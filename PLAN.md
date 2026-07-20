@@ -1,5 +1,26 @@
 # AI-Agent Academic Writing Assistant — Implementation Plan (v2: Playground-first)
 
+> **📌 Status (2026-07-19): historical design document.** This plan was written
+> before implementation began (when the repo was greenfield). The MVP it describes
+> is now built — but with these divergences, which this document does NOT reflect:
+>
+> 1. **Storage (§5/§10.5):** persistence is a **FastAPI + SQLite backend**
+>    (`backend/`), not IndexedDB/Dexie. The backend owns the checkpoint DAG,
+>    conversations, memories, and the server-side LLM key.
+> 2. **Backend (§8):** "no backend in the MVP" is obsolete — a **LangGraph agent**
+>    already exists (`/api/agent/run`), alongside the default frontend agent loop.
+> 3. **Mode-B diff basis (§6/§10.4):** checkpoint compare uses **structural JSON
+>    tokenization** (`frontend/src/diff/tokenize.ts`) over the serialized state,
+>    not a Markdown flatten — truer to §4.1 in practice.
+> 4. **CitationNode (§7):** exports via plaintext `data-citation*` attributes
+>    (readable, round-trips fine), not base64 `data-lexical-citation`.
+> 5. **Lexical pin (§3.2):** the fork tracks nightly `0.45.1-nightly.20260623.0`,
+>    not a released tag.
+>
+> For the current architecture see **`README.md`**; for known issues and tech debt
+> see **`REVIEW.md`**. The body below is kept verbatim as the design record — the
+> reasoning (fork thesis, diff/checkpoint design, trap analysis) still applies.
+
 > **What changed from v1.** v1 planned to build the Lexical rich-text frontend **from
 > scratch** (hand-written `CitationNode`/`MathNode`, a custom editor shell). That path means
 > reimplementing dozens of plugins/nodes and racing upstream — the complexity you flagged.

@@ -42,10 +42,12 @@ def to_out(cp: Checkpoint) -> dict:
 
 
 def _latest_durable_id(db: Session, pid: str) -> Optional[str]:
+    # Tiebreak on id: created_at is millisecond-resolution, and a same-ms tie
+    # must still resolve deterministically (which row becomes the DAG parent).
     row = (
         db.query(Checkpoint)
         .filter(Checkpoint.project_id == pid, Checkpoint.source != "auto")
-        .order_by(Checkpoint.created_at.desc())
+        .order_by(Checkpoint.created_at.desc(), Checkpoint.id.desc())
         .first()
     )
     return row.id if row else None
@@ -59,7 +61,7 @@ def _enforce_retention(db: Session, pid: str, current_id: Optional[str]) -> None
     durables = (
         db.query(Checkpoint)
         .filter(Checkpoint.project_id == pid, Checkpoint.source != "auto")
-        .order_by(Checkpoint.created_at.asc())
+        .order_by(Checkpoint.created_at.asc(), Checkpoint.id.asc())
         .all()
     )
     excess = len(durables) - MAX_DURABLE_CHECKPOINTS
@@ -78,7 +80,7 @@ def list_checkpoints(pid: str, db: Session = Depends(get_db)):
     rows = (
         db.query(Checkpoint)
         .filter_by(project_id=pid)
-        .order_by(Checkpoint.created_at.desc())
+        .order_by(Checkpoint.created_at.desc(), Checkpoint.id.desc())
         .all()
     )
     return [to_out(c) for c in rows]

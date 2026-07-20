@@ -10,7 +10,7 @@ export type ChatMode = 'selection' | 'document';
 
 /**
  * Context captured at send time and stored on the user message (drives Retry).
- * The full document text is read fresh by the agent (runAgent) — only the edit
+ * The full document text is read fresh by the agent — only the edit
  * target (a selection, if any) is captured here.
  */
 export interface MessageContext {
@@ -58,16 +58,31 @@ export type AssistantAction =
 
 /**
  * A non-terminal agent step — the AI inspected the document (read all of it, or
- * searched for a term) or saved a long-term memory note. Shown as a chip in the
- * message. These do NOT stop the loop; only an AssistantAction (or no action)
- * does.
+ * searched for a term), consulted the literature library, saved a long-term
+ * memory note, or dispatched a subagent. Shown as a chip in the message. These
+ * do NOT stop the loop; only an AssistantAction (or no action) does.
  */
 export interface AgentStep {
-  kind: 'read' | 'search' | 'remember';
-  /** search query, or undefined for a full read */
+  kind:
+    | 'read'
+    | 'search'
+    | 'remember'
+    | 'literature_list'
+    | 'literature_search'
+    | 'literature_read'
+    | 'figure'
+    | 'notes'
+    | 'delegate';
+  /** search/literature_search query, figure `#seq`, or undefined for a full read */
   query?: string;
   /** remember: the note the AI saved. */
   note?: string;
+  /** literature_read/figure: the literature title involved. */
+  literature?: string;
+  /** delegate: the delegated task briefing (truncated). */
+  task?: string;
+  /** delegate/sub-step: nesting depth (1..3) — the main agent is depth 0. */
+  depth?: number;
   /** read/search: how many characters/snippets came back (for the chip label). */
   hits?: number;
   at: number;
@@ -103,6 +118,10 @@ export interface ChatMessage {
   snapshot?: string;
   /** Assistant patch only: a patch-level failure that supersedes the patch card.
    *  'ignored' = mis-copied past the retry budget (dropped); 'stale' = the
-   *  underlying text changed while the AI worked (can't complete). */
-  patchFailure?: 'ignored' | 'stale';
+   *  underlying text changed while the AI worked (can't complete); 'invalid' =
+   *  structurally un-applicable (references a citation/equation not in the search
+   *  passage, or spans nested formatting around a decorator). */
+  patchFailure?: 'ignored' | 'stale' | 'invalid';
+  /** When `patchFailure === 'invalid'`, the specific reason (from applyTextPatch). */
+  patchFailureReason?: string;
 }

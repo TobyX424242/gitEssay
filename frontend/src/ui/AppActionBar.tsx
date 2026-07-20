@@ -21,7 +21,7 @@ import {
 } from 'lexical';
 import {type JSX, useEffect, useLayoutEffect, useRef, useState} from 'react';
 
-import {chatPanel, versionsPanel} from '../chat/panelStore';
+import {chatPanel, openLeftDock, useLeftDockTab, versionsPanel} from '../chat/panelStore';
 import useModal from '../hooks/useModal';
 import ProjectSwitcher from '../projects/ProjectSwitcher';
 import {docFromHash} from '../utils/docSerialization';
@@ -37,6 +37,7 @@ export default function AppActionBar(): JSX.Element {
   const [modal, showModal] = useModal();
   const chat = useSidePanel(chatPanel);
   const versions = useSidePanel(versionsPanel);
+  const leftTab = useLeftDockTab();
   const barRef = useRef<HTMLDivElement>(null);
 
   // Publish the app bar's live height so the sticky formatting toolbar (and
@@ -146,11 +147,31 @@ export default function AppActionBar(): JSX.Element {
         <span className="app-bar-divider" />
         <button
           type="button"
-          className={`app-bar-btn${versions.open ? ' is-active' : ''}`}
-          onClick={() => versionsPanel.toggle()}
+          className={`app-bar-btn${versions.open && leftTab === 'versions' ? ' is-active' : ''}`}
+          onClick={() => {
+            if (versions.open && leftTab === 'versions') {
+              versionsPanel.close();
+            } else {
+              openLeftDock('versions');
+            }
+          }}
           title="Versions"
           aria-label="Toggle version history">
           <i className="versions" />
+        </button>
+        <button
+          type="button"
+          className={`app-bar-btn${versions.open && leftTab === 'literature' ? ' is-active' : ''}`}
+          onClick={() => {
+            if (versions.open && leftTab === 'literature') {
+              versionsPanel.close();
+            } else {
+              openLeftDock('literature');
+            }
+          }}
+          title="Literature"
+          aria-label="Toggle literature library">
+          <i className="literature" />
         </button>
         <button
           type="button"
