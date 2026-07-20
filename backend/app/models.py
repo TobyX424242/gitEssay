@@ -111,6 +111,12 @@ class Literature(Base):
     title = Column(String, nullable=False, default="")
     status = Column(String, nullable=False, default="processing")
     error = Column(Text, nullable=True)
+    # Crash-loop guard: each ingest run increments this; startup auto-resume
+    # gives up after a couple of attempts (manual reparse resets it to 0).
+    parse_attempts = Column(Integer, nullable=False, default=0)
+    # Embedding indexing outcome: none (not parsed yet) | disabled (no model
+    # configured) | ok | failed (keyword search only).
+    embed_status = Column(String, nullable=False, default="none")
     # AI-generated summary (map-reduce over chunks, see literature_summary.py).
     # summary_status: none → generating → ready | failed | skipped (AI unconfigured)
     summary = Column(Text, nullable=True)

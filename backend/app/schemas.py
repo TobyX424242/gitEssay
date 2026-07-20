@@ -117,6 +117,9 @@ class LiteratureOut(BaseModel):
     note_count: int = 0
     # AI summary lifecycle: none → generating → ready | failed | skipped
     summary_status: str = "none"
+    # Embedding indexing outcome: none | disabled (no model configured) | ok |
+    # failed (keyword search only)
+    embed_status: str = "none"
     # Parse progress 0..1 while processing (PDFs); null = indeterminate
     progress: Optional[float] = None
     created_at: int
@@ -141,23 +144,6 @@ class LiteratureDetail(LiteratureOut):
 
 
 # ---- AI -------------------------------------------------------------------
-class ChatRequest(BaseModel):
-    system: str
-    user: str
-
-
-class ChatResponse(BaseModel):
-    content: str
-
-
-class ChatStreamRequest(BaseModel):
-    """Multi-turn streaming chat. `messages` is an OpenAI-style
-    [{role: 'user'|'assistant', content: str}] array — tool results are framed
-    as user turns by the frontend, so the same shape serves both providers."""
-    system: str
-    messages: list[dict[str, Any]]
-
-
 class AISettingsOut(BaseModel):
     provider_format: str
     base_url: str

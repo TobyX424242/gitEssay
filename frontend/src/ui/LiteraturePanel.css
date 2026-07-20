@@ -233,6 +233,10 @@
 .lit-delete {
   flex: none;
 }
+
+.lit-retry {
+  flex: none;
+}
 .lit-drop-hint {
   position: absolute;
   inset: 0;

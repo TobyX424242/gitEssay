@@ -1,6 +1,6 @@
 """gitEssay backend — LangGraph agent system prompt.
 
-Ported from the frontend buildSystemPrompt (src/chat/providers.ts), restructured
+Ported from the frontend's former buildSystemPrompt, restructured
 for NATIVE tool-calling: the <thinking>/<action> markup grammar is gone (the
 model calls tools instead), and the sentinel/patch rules now live on the
 propose_patch tool docstring (agent_tools.py). Memories are loaded server-side

@@ -3,9 +3,10 @@
  * project) + the user-facing enable/disable toggle.
  *
  * The notes themselves are stored backend-side (`/api/projects/{pid}/memories`)
- * and injected into the agent's system prompt by runAgent. Whether to use memory
- * at all is a user preference kept in localStorage (the backend just stores and
- * serves notes; the frontend gates injection + the `remember` action on this flag).
+ * and injected into the agent's system prompt by the LangGraph backend. Whether
+ * to use memory at all is a user preference kept in localStorage (the backend
+ * stores/serves notes and runs the `remember` tool; the toggle is forwarded as
+ * `memory_enabled` with each run).
  */
 import {useEffect, useSyncExternalStore, useState} from 'react';
 

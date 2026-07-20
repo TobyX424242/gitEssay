@@ -16,6 +16,7 @@ import {
   downloadUrl,
   getLiterature,
   regenerateSummary,
+  reparseLiterature,
   trackUpload,
   useLiterature,
   useUploadError,
@@ -61,6 +62,12 @@ export default function LiteraturePanel(): JSX.Element {
     for (const file of Array.from(files)) {
       trackUpload(pid, file);
     }
+  };
+
+  const onReparse = (lit: Literature) => {
+    reparseLiterature(lit.id).catch(e =>
+      setError(e instanceof Error ? e.message : String(e)),
+    );
   };
 
   const onDelete = (lit: Literature) => {
@@ -177,6 +184,16 @@ export default function LiteraturePanel(): JSX.Element {
                   </div>
                 )}
               </button>
+              {lit.status === 'error' && (
+                <button
+                  type="button"
+                  className="cp-close lit-retry"
+                  title="Retry parsing (the original file is still on disk)"
+                  aria-label={`Retry parsing ${lit.title}`}
+                  onClick={() => onReparse(lit)}>
+                  ↻
+                </button>
+              )}
               <button
                 type="button"
                 className="cp-close lit-delete"
@@ -265,6 +282,8 @@ function LiteratureDetailModal({
                 {detail.filename} · {detail.page_count}p · {detail.chunk_count} chunks ·{' '}
                 {detail.image_count} figures
                 {detail.note_count > 0 && ` · ${detail.note_count} notes`}
+                {detail.embed_status === 'failed' &&
+                  ' · embeddings failed (keyword search only)'}
               </span>
             </div>
             {detail.status === 'error' && (
@@ -307,6 +326,19 @@ function LiteratureDetailModal({
         <footer className="lit-detail-footer">
           {detail && (
             <>
+              {detail.status === 'error' && (
+                <button
+                  type="button"
+                  className="cp-button"
+                  title="Re-run parsing from the original file"
+                  onClick={() =>
+                    reparseLiterature(lid).catch(e =>
+                      setError(e instanceof Error ? e.message : String(e)),
+                    )
+                  }>
+                  ↻ Retry parse
+                </button>
+              )}
               <a
                 className="cp-button"
                 href={downloadUrl(detail)}

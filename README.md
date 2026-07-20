@@ -38,9 +38,10 @@ No accounts, no auth, no collaboration — by design (see `PLAN.md §10`).
 - **`backend/`** — FastAPI + SQLite. Owns persistence (the Lexical
   `SerializedEditorState` is stored as opaque JSON — never parsed server-side)
   and acts as the LLM gateway. See `backend/README.md` for the API list.
-- The chat sidebar has **two agent engines**: a frontend loop (default) and a
-  backend LangGraph loop behind `/api/agent/run`, switchable in the UI. The
-  literature tooling below (search/read/figures/subagents) is LangGraph-only.
+- The chat sidebar runs on a single **LangGraph agent** behind
+  `/api/agent/run` (the backend owns the loop, tools, prompt, and memories;
+  the model must support tool calling). The same engine serves the docker and
+  desktop builds, so behavior is identical across deployments.
 
 ## Literature & RAG (LangGraph agent)
 
@@ -87,6 +88,7 @@ No accounts, no auth, no collaboration — by design (see `PLAN.md §10`).
 | `GITESSAY_DATA_DIR` | dir of the DB | literature originals/figures on disk |
 | `GITESSAY_CORS_ORIGINS` | localhost:5180 | extra allowed origins (comma-sep) |
 | `HF_HOME` | `~/.cache/huggingface` | docling layout-model cache (~500 MB) |
+| `GITESSAY_FRONTEND_BUILD` | unset | serve a built frontend dir same-origin (desktop mode) |
 
 ## Quick start (dev)
 
@@ -101,6 +103,17 @@ cd frontend && npm ci && npm run dev
 
 Then open http://localhost:5180 and configure your LLM provider in the chat
 sidebar's settings panel (key is stored server-side, masked on read).
+
+## Quick start (desktop app)
+
+Single-process local build (Windows / Linux / macOS), all data in the
+per-user data dir — see [DESKTOP.md](DESKTOP.md) for the full plan.
+
+```bash
+cd backend && uv sync --group desktop
+uv run python -m app.desktop                     # native window (falls back to browser)
+cd .. && python3 scripts/build_desktop.py        # full build → dist archive (same as CI)
+```
 
 ## Quick start (docker)
 
@@ -128,5 +141,7 @@ GE_TEST_DOCLING=1 uv run pytest          # incl. the real-docling parse smoke te
 - `PLAN.md` — the original v2 design plan (historical; a banner at the top
   records where the implementation diverged).
 - `REVIEW.md` — 2026-07 code review: findings, fixes applied, tech-debt list.
+- `DESKTOP.md` — desktop port: feasibility analysis, packaging, data dirs,
+  cross-platform CI build.
 - `backend/README.md` — backend API reference.
 - `docker-compose.yml` — one-command local stack.

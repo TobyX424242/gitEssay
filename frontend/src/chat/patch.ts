@@ -125,7 +125,7 @@ function parseAction(jsonBody: string): AssistantAction | null {
   switch (obj.kind) {
     case 'patch':
       // Edits live on ChatMessage.edits (with per-edit state); the action only
-      // carries the commit-style explanation. runAgent pulls edits via actionEdits().
+      // carries the commit-style explanation. Edits are pulled via actionEdits().
       return {
         kind: 'patch',
         explanation:

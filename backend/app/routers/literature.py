@@ -53,6 +53,7 @@ def _to_out(db: Session, lit: Literature) -> dict:
         "image_count": lit.image_count,
         "note_count": _note_count(db, lit.id),
         "summary_status": lit.summary_status or "none",
+        "embed_status": lit.embed_status or "none",
         "progress": lit.progress,
         "created_at": lit.created_at,
     }
@@ -161,6 +162,39 @@ def regenerate_summary(lid: str, db: Session = Depends(get_db)):
         return _to_out(db, lit)  # already running — don't stack threads
     start_summary(lid)
     db.refresh(lit)
+    return _to_out(db, lit)
+
+
+@router.post("/literature/{lid}/reparse", response_model=schemas.LiteratureOut)
+def reparse_literature(lid: str, db: Session = Depends(get_db)):
+    """Re-run parsing from the still-on-disk original — after a failure, an
+    interrupted run, or a docling upgrade. Clears all derived artifacts (chunks,
+    FTS rows, images, summary) first; a parse is all-or-nothing."""
+    lit = _get_literature_or_404(db, lid)
+    if lit.status == "processing":
+        raise HTTPException(status_code=409, detail="already parsing")
+    if not glob.glob(os.path.join(literature_dir(lid), "original.*")):
+        raise HTTPException(
+            status_code=404, detail="original file missing — re-upload instead"
+        )
+    db.query(LiteratureChunk).filter_by(literature_id=lid).delete()
+    db.query(LiteratureImage).filter_by(literature_id=lid).delete()
+    delete_literature_fts(db, lid)
+    shutil.rmtree(os.path.join(literature_dir(lid), "images"), ignore_errors=True)
+    lit.status = "processing"
+    lit.error = None
+    lit.progress = None
+    lit.title = lit.filename
+    lit.page_count = 0
+    lit.char_count = 0
+    lit.chunk_count = 0
+    lit.image_count = 0
+    lit.summary = None
+    lit.summary_status = "none"
+    lit.embed_status = "none"
+    lit.parse_attempts = 0
+    db.commit()
+    start_ingest(lid)
     return _to_out(db, lit)
 
 

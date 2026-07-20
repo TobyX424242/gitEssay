@@ -7,8 +7,8 @@ real logic with full graph-state access (the doc snapshot, the read de-dupe map,
 the DB session for `remember`, and the terminal flag for propose_patch/ask_user).
 The function bodies raise to make accidental direct invocation obvious.
 
-`do_read` / `_filter_paragraphs` / `_cap` are ports of the frontend frameRead
-helpers (src/chat/providers.ts) so the backend returns the same-shaped results.
+`do_read` / `_filter_paragraphs` / `_cap` are ports of the frontend's former
+read/search helpers so the backend returns the same-shaped results.
 """
 from langchain.tools import tool
 

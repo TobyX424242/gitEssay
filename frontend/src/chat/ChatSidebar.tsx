@@ -1,8 +1,8 @@
 /**
  * gitEssay — AI chat sidebar (VS Code-style right dock).
  *
- * Always-available conversation surface. The send/retry path runs a STREAMING
- * agent (runAgent): the model's <thinking> streams into a collapsible Thoughts
+ * Always-available conversation surface. The send/retry path runs the STREAMING
+ * LangGraph agent (runAgentGraph): the model's thinking streams into a collapsible Thoughts
  * pane (expanded live, auto-collapsed when the turn finishes), and each turn ends
  * in one terminal action — patch (reviewable diffs, checkpointed on accept with
  * the model's explanation as the label), ask (options + a free-text box), or
@@ -58,9 +58,7 @@ import {
 } from './memories';
 import {useActiveProjectId} from '../projects/projectStore';
 import {useCompareMode} from '../ui/CompareMode';
-import {runAgentGraph} from './agentClient';
-import {useAgentEngine} from './agentEngine';
-import {docParagraphs, messagesToHistory, runAgent} from './providers';
+import {docParagraphs, messagesToHistory, runAgentGraph} from './agentClient';
 import {buildRetryPlan, lifoRevertSteps} from './retry';
 import type {RetryPlan} from './retry';
 import type {ChatTurn} from '../rewrite/llmClient';
@@ -179,7 +177,6 @@ export default function ChatSidebar(): JSX.Element {
   const messages = active?.messages ?? [];
   const memories = useMemories(activeProjectId);
   const memoryEnabled = useMemoryEnabled();
-  const agentEngine = useAgentEngine();
   // Compare mode only sets `editor.setEditable(false)` — programmatic
   // `editor.update` (accept / retry-revert) would still mutate the live doc
   // underneath the frozen diff view. Mutations must bail out while it's on.
@@ -355,13 +352,9 @@ export default function ChatSidebar(): JSX.Element {
         mode: args.mode,
         selectionText: args.selectionText,
         signal: controller.signal,
+        // Long-term memory is owned by the backend (it runs the remember tool);
+        // the frontend only forwards the on/off toggle.
         memoryEnabled,
-        memories: memories.map(m => ({content: m.content})),
-        onRemember: async (note: string) => {
-          if (activeProjectId) {
-            await addMemory(activeProjectId, note);
-          }
-        },
         onUpdate: (patch: Partial<ChatMessage>) =>
           setStreaming(s => (s && s.id === args.streamingId ? {...s, ...patch} : s)),
       };
@@ -375,9 +368,7 @@ export default function ChatSidebar(): JSX.Element {
             : s,
         );
         const opts = {...runOptsBase, history: h, instruction: instr};
-        return agentEngine === 'langgraph'
-          ? runAgentGraph({...opts, projectId: activeProjectId ?? ''})
-          : runAgent(opts);
+        return runAgentGraph({...opts, projectId: activeProjectId ?? ''});
       };
 
       // Multi-layer fallback: validate the patch the AI produced; re-prompt on a
@@ -478,7 +469,7 @@ export default function ChatSidebar(): JSX.Element {
           abortRef.current = null;
         });
     },
-    [activeProjectId, agentEngine, configured, editor, memories, memoryEnabled],
+    [activeProjectId, configured, editor, memories, memoryEnabled],
   );
 
   const send = useCallback(

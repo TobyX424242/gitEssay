@@ -105,4 +105,4 @@ recorded in the same spirit:
 | N3 | ⚖️ | `backend/app/agent_graph.py` | M10 deepened: nested subagents share the request-scoped SQLAlchemy Session (serial execution makes it safe today); the async-node rewrite (M10) should move each run to its own session. |
 | N4 | ⚖️ | `backend/app/agent_graph.py` | Subagent reports are plain text capped at 6k chars — no structured citations back to chunk ids; the parent cites by paper title only. |
 | N5 | ⚖️ | `backend/app/literature_ingest.py` | docling parsing is serialized process-wide (one lock) — uploads queue rather than parallelize. Deliberate (torch thread-safety + single-user), but a batch upload parses N× sequentially. |
-| N6 | ⚖️ | `frontend` | The legacy frontend agent loop has no literature tools — literature features require the LangGraph engine (README calls this out). |
+| N6 | ✅ | `frontend` | ~~The legacy frontend agent loop has no literature tools~~ — resolved: the frontend loop was removed; LangGraph is now the only agent engine. |

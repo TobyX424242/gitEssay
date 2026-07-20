@@ -8,3 +8,7 @@ __pycache__/
 # uploaded literature originals/extracted images + docling model cache
 data/
 literature/
+
+# build artifacts
+dist/
+build/

@@ -16,6 +16,9 @@ export type LiteratureStatus = 'processing' | 'ready' | 'error';
 /** Lifecycle of the auto-generated AI summary (backend, post-parse). */
 export type SummaryStatus = 'none' | 'generating' | 'ready' | 'failed' | 'skipped';
 
+/** Embedding indexing outcome (failed = keyword search only). */
+export type EmbedStatus = 'none' | 'disabled' | 'ok' | 'failed';
+
 export interface Literature {
   id: string;
   project_id: string;
@@ -29,6 +32,7 @@ export interface Literature {
   image_count: number;
   note_count: number;
   summary_status: SummaryStatus;
+  embed_status: EmbedStatus;
   /** Parse progress 0..1 while processing (PDFs); null = indeterminate. */
   progress: number | null;
   created_at: number;
@@ -132,6 +136,14 @@ export async function deleteLiterature(id: string): Promise<void> {
   emit();
 }
 
+/** Re-run parsing from the still-on-disk original (after a failure or an
+ * interrupted run). The row flips back to `processing` and polling resumes. */
+export async function reparseLiterature(lid: string): Promise<Literature> {
+  const lit = await api.post<Literature>(`/literature/${lid}/reparse`);
+  emit();
+  return lit;
+}
+
 // --- in-flight uploads (shared so the panel and the global drop zone agree) --
 export interface UploadProgress {
   name: string;
@@ -209,9 +221,8 @@ export function useLiterature(pid: string | null): Literature[] {
           }
         })
         .catch(() => {
-          if (alive) {
-            setData([]);
-          }
+          // Keep showing the last good list on a transient fetch failure —
+          // the next emit/poll tick recovers on its own.
         });
     };
     tick();

@@ -12,6 +12,7 @@ import glob
 import json
 import logging
 import os
+import shutil
 import threading
 from dataclasses import dataclass, field
 
@@ -244,14 +245,24 @@ def _ingest_safe(literature_id: str) -> None:
         ingest(db, literature_id)
     except Exception as e:  # noqa: BLE001 — never lose the failure
         log.exception("literature ingest failed: %s", literature_id)
+        # Roll back BEFORE recording the error: the failing session may hold
+        # pending chunk/image/FTS rows that must never be committed (a parse
+        # is all-or-nothing). Also drop any images already written to disk.
+        db.rollback()
+        shutil.rmtree(
+            os.path.join(literature_dir(literature_id), "images"), ignore_errors=True
+        )
         try:
-            lit = db.get(Literature, literature_id)
-            if lit is not None:
-                lit.status = "error"
-                lit.error = f"{type(e).__name__}: {e}"[:500]
-                db.commit()
+            with SessionLocal() as fresh:
+                lit = fresh.get(Literature, literature_id)
+                if lit is not None:  # may have been deleted mid-parse
+                    lit.status = "error"
+                    lit.error = f"{type(e).__name__}: {e}"[:2000]
+                    lit.progress = None
+                    lit.embed_status = "none"
+                    fresh.commit()
         except Exception:  # noqa: BLE001
-            db.rollback()
+            log.exception("failed to record ingest error: %s", literature_id)
     finally:
         db.close()
 
@@ -262,6 +273,10 @@ def ingest(db: Session, literature_id: str) -> None:
     lit = db.get(Literature, literature_id)
     if lit is None:
         return
+    # Count every attempt up-front so a file that keeps crashing the process
+    # trips the startup auto-resume guard instead of crash-looping.
+    lit.parse_attempts = (lit.parse_attempts or 0) + 1
+    db.commit()
     originals = glob.glob(os.path.join(literature_dir(literature_id), "original.*"))
     if not originals:
         raise FileNotFoundError("original upload missing")
@@ -274,6 +289,16 @@ def ingest(db: Session, literature_id: str) -> None:
             db.rollback()
 
     extracted = _extract(originals[0], lit.filename, on_progress=_progress)
+    if not extracted.chunks:
+        raise RuntimeError(
+            "no extractable text found (empty document or image-only scan)"
+        )
+    # The document may have been deleted while docling was running (the delete
+    # endpoint doesn't wait for us). Bail quietly — the delete endpoint owns
+    # the disk, and we haven't written anything yet.
+    with SessionLocal() as check:
+        if check.get(Literature, literature_id) is None:
+            return
 
     os.makedirs(os.path.join(literature_dir(literature_id), "images"), exist_ok=True)
     for seq, img in enumerate(extracted.images):
@@ -292,8 +317,19 @@ def ingest(db: Session, literature_id: str) -> None:
         )
 
     settings = db.get(AISettings, 1)
+    embedding_configured = bool(
+        settings
+        and (settings.embedding_model or "").strip()
+        and settings.provider_format == "openai"
+        and settings.api_key
+        and settings.base_url
+    )
     texts = [c.text for c in extracted.chunks]
     embeddings = embed_texts(texts, settings) if settings else None
+    # Surface silent degradation: 'failed' means keyword search only.
+    lit.embed_status = (
+        "ok" if embeddings else ("failed" if embedding_configured else "disabled")
+    )
 
     use_fts = fts_enabled()
     for seq, (chunk, embedding) in enumerate(
@@ -323,4 +359,9 @@ def ingest(db: Session, literature_id: str) -> None:
     lit.progress = 1.0
     db.commit()
     # Auto-summarize in the background (skipped inside when AI is unconfigured).
-    start_summary(literature_id)
+    # Isolated: a failure here must not drag the (already ready) document down
+    # to error in _ingest_safe.
+    try:
+        start_summary(literature_id)
+    except Exception:  # noqa: BLE001
+        log.exception("failed to start summary: %s", literature_id)

@@ -50,10 +50,11 @@ table for literature search. Uploaded literature files live under
   `embedding_model` is set on an OpenAI-format provider) + figure images;
   then a bounded map-reduce summarizer (`literature_summary.py`) auto-writes
   the paper summary (head+tail+even-sample selection, ~5 LLM calls,
-  book-length safe; `skipped` when AI is unconfigured).
-- **AI**: `POST /chat` `{system,user}`→`{content}` (blocking, uses server
-  settings), `POST /chat/stream` (SSE; normalized
-  `{type: thinking|text|done|error}` events), `GET/PUT /ai/settings` (key masked
+  book-length safe; `skipped` when AI is unconfigured),
+  `POST /literature/{lid}/reparse` (re-run parsing from the on-disk original
+  after a failure/interruption; clears derived artifacts first; a parse is
+  all-or-nothing). Interrupted parses/summaries auto-resume on startup.
+- **AI**: `GET/PUT /ai/settings` (key masked
   on read; `api_key=null` keeps existing; capability flags `vision_capable`
   and `embedding_model` live here), `POST /ai/test`,
   `POST /agent/run` (SSE; LangGraph ReAct agent — the backend owns the

@@ -27,6 +27,13 @@ dev = [
     "pytest>=9.1.1",
     "reportlab>=5.0.0",
 ]
+# Desktop packaging (see DESKTOP.md): `uv sync --group desktop`, then
+# `uv run python -m app.desktop` or `uv run pyinstaller desktop.spec`.
+desktop = [
+    "platformdirs>=4.3",
+    "pywebview>=5.4",
+    "pyinstaller>=6.11",
+]
 
 # CPU-only PyTorch wheels: the PyPI `torch` wheel drags in ~3 GB of CUDA
 # runtime packages (nvidia-*, triton) that are dead weight in a CPU container.

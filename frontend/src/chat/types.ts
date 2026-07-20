@@ -10,7 +10,7 @@ export type ChatMode = 'selection' | 'document';
 
 /**
  * Context captured at send time and stored on the user message (drives Retry).
- * The full document text is read fresh by the agent (runAgent) — only the edit
+ * The full document text is read fresh by the agent — only the edit
  * target (a selection, if any) is captured here.
  */
 export interface MessageContext {
