@@ -102,7 +102,13 @@ validation build (artifacts only, no Release).
    that ship data files (e.g. rapidocr's `default_models.yaml` and bundled
    .onnx models) must be `collect_all`'d in the spec, or the frozen build
    fails at runtime with `FileNotFoundError`. Watch for the same class of
-   issue when adding parsing dependencies.
+   issue when adding parsing dependencies. The inverse hazard exists too:
+   **over-excluding breaks torch** — `torch.testing` must stay in the PYZ
+   (excluding it makes the first `import torch` fail partway, after
+   `torch._C._rpc_init()` has already registered its pybind types; the retry
+   then dies with `generic_type: cannot initialize type "RpcBackendOptions":
+   an object with that name is already defined`). Rule of thumb: after ANY
+   spec change, smoke-test an actual PDF parse, not just server startup.
 1. **Size**: the torch(CPU) + docling + opencv chain sets the floor at ~1 GB
    (measured after the size trim: **981 MB onedir, ~390 MB as tar.gz**, down
    from 1.4 GB / 514 MB). The trim: `strip=True` in the spec (~150 MB of debug
