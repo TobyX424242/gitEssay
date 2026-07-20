@@ -30,6 +30,19 @@ for pkg in (
     except Exception:
         pass
 
+# Trimmed from the frozen app: uvicorn[standard] extras the desktop mode
+# never uses (it pins asyncio/h11, ws=none), plus GUI/tooling strays.
+# NOTE: `websockets` must stay — langgraph_sdk imports it (stream transport),
+# and `dotenv` must stay — the langchain chain imports it lazily at parse time.
+EXCLUDES = [
+    "pytest",
+    "uvloop",
+    "httptools",
+    "wsproto",
+    "watchfiles",
+    "tkinter",
+]
+
 a = Analysis(
     ["desktop_main.py"],
     pathex=[],
@@ -38,7 +51,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=["pytest"],
+    excludes=EXCLUDES,
     noarchive=False,
 )
 pyz = PYZ(a.pure)
