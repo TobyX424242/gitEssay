@@ -43,8 +43,10 @@ import {INSERT_PAGE_BREAK} from '../PageBreakExtension';
 import {InsertTableDialog} from '../TablePlugin';
 
 export class ComponentPickerOption extends MenuOption {
-  title: string;
-  icon?: JSX.Element;
+  // `declare`: these intentionally redeclare MenuOption's own members (the
+  // constructor assigns them below, exactly like the base would).
+  declare title: string;
+  declare icon?: JSX.Element;
   keywords: string[];
   keyboardShortcut?: string;
   onSelect: (queryString: string) => void;

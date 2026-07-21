@@ -143,9 +143,17 @@ function LazyImage({
     }
   }, [status.error, onError]);
 
-  if (status.error) {
+  // `=== true`, not a truthiness check: with strictNullChecks off (this
+  // project's tsconfig), only equality narrowing discriminates the union.
+  if (status.error === true) {
     return <BrokenImage />;
   }
+
+  // The union is narrowed past {error: true} here — but TS narrowing does not
+  // cross into the calculateDimensions closure below, so hoist the natural
+  // dimensions out of it.
+  const naturalWidth = status.width;
+  const naturalHeight = status.height;
 
   // Calculate final dimensions with proper scaling
   const calculateDimensions = () => {
@@ -169,9 +177,6 @@ function LazyImage({
     }
 
     // Use natural dimensions if available, otherwise fallback to defaults
-    const naturalWidth = status.width;
-    const naturalHeight = status.height;
-
     //  If SVG has no intrinsic dimensions (0), fallback to a sensible default (maxWidth)
     let finalWidth = naturalWidth || maxWidth;
     let finalHeight = naturalHeight || finalWidth;

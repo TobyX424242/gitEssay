@@ -7,7 +7,9 @@
  */
 
 export function setDomHiddenUntilFound(dom: HTMLElement): void {
-  dom.hidden = 'until-found';
+  // "until-found" is valid per the HTML spec but newer than the DOM lib's
+  // `hidden: boolean` typing — widen the type at this one assignment.
+  (dom as {hidden: boolean | string}).hidden = 'until-found';
 }
 
 export function domOnBeforeMatch(dom: HTMLElement, callback: () => void): void {
