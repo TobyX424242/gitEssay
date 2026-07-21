@@ -93,18 +93,6 @@ function truncate(s: string, n: number): string {
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 }
 
-/** Step-chip icon per AgentStep kind (LangGraph agent tool activity). */
-const STEP_ICON: Record<string, string> = {
-  read: '📖',
-  search: '🔍',
-  literature_list: '📚',
-  literature_search: '📚',
-  literature_read: '📄',
-  figure: '🖼',
-  notes: '🗒',
-  delegate: '🤖',
-};
-
 /** Group memory notes for the Memory panel: project-wide first, then one
  *  section per literature item (per-paper notes the agent saved). */
 function groupMemories(
@@ -152,7 +140,7 @@ function stepLabel(s: AgentStep): string {
       return 'consulted long-term notes';
     case 'delegate': {
       const layer = s.depth ? ` (layer ${s.depth + 1})` : '';
-      return `dispatched a subagent${layer}: ${s.task ?? ''}`;
+      return `delegated a subtask${layer}: ${s.task ?? ''}`;
     }
     case 'read':
     default:
@@ -519,7 +507,7 @@ export default function ChatSidebar(): JSX.Element {
       if (compareActive) {
         // Retry reverts applied patches — a live-doc mutation.
         setNotice({
-          text: 'Exit the checkpoint comparison before retrying — retrying reverts edits in the live document.',
+          text: 'Exit the comparison before retrying — retrying reverts edits in the live document.',
           key: Date.now(),
         });
         return null;
@@ -597,21 +585,19 @@ export default function ChatSidebar(): JSX.Element {
           setNotice({
             text: `↩ Reverted ${undone} accepted edit${
               undone === 1 ? '' : 's'
-            } across ${plan.items.length} response${
-              plan.items.length === 1 ? '' : 's'
-            } (newest first) so the new attempt can apply cleanly. Accepted versions stay in History.`,
+            } so the new attempt can apply cleanly. Accepted versions stay in History.`,
             key: Date.now(),
           });
         } else if (undone > 0) {
           setNotice({
             text: `↩ Reverted ${undone} of ${plan.totalEdits} edit${
               plan.totalEdits === 1 ? '' : 's'
-            }; ${skippedDetail}. Retrying anyway against the current doc — the new patch may not apply to those parts.`,
+            }; ${skippedDetail}. The new patch may not apply to those parts.`,
             key: Date.now(),
           });
         } else {
           setNotice({
-            text: `Couldn't auto-revert the edit(s) (${skippedDetail}). Retrying anyway — the new patch may not apply.`,
+            text: `Couldn't revert the edit(s) (${skippedDetail}). Retrying anyway — the new patch may not apply.`,
             key: Date.now(),
           });
         }
@@ -696,7 +682,7 @@ export default function ChatSidebar(): JSX.Element {
         // Accepting applies patches to the live doc — forbidden while the
         // frozen compare view is showing (the two would silently diverge).
         setNotice({
-          text: 'Exit the checkpoint comparison before accepting a patch.',
+          text: 'Exit the comparison before accepting a patch.',
           key: Date.now(),
         });
         return;
@@ -749,7 +735,7 @@ export default function ChatSidebar(): JSX.Element {
         }
         if (staleCount > 0) {
           setNotice({
-            text: `⚠ ${staleCount} edit${staleCount === 1 ? '' : 's'} couldn't be applied — the original text changed while the AI was working (the document was edited since this was proposed), so ${staleCount === 1 ? 'that edit' : 'those edits'} can't be completed. Reject ${staleCount === 1 ? 'it' : 'them'} and re-send if you still want the change.`,
+            text: `⚠ ${staleCount} edit${staleCount === 1 ? '' : 's'} couldn't be applied — the original text changed since ${staleCount === 1 ? 'it was' : 'they were'} proposed. Reject and re-send to try again.`,
             key: Date.now(),
           });
         }
@@ -991,9 +977,8 @@ export default function ChatSidebar(): JSX.Element {
                 </div>
                 <div className="ai-body">
                   <p className="ai-note">
-                    Retrying will <strong>revert {pendingRetry.totalEdits} accepted edit{pendingRetry.totalEdits === 1 ? '' : 's'}</strong> across{' '}
-                    {pendingRetry.items.length} response{pendingRetry.items.length === 1 ? '' : 's'} — undone newest-first,
-                    back to this one — so the regenerated response can apply cleanly.
+                    Retrying will <strong>revert {pendingRetry.totalEdits} accepted edit{pendingRetry.totalEdits === 1 ? '' : 's'}</strong>{' '}
+                    so the new response can apply cleanly.
                   </p>
                   <ul className="retry-items">
                     {pendingRetry.items.map(it => (
@@ -1034,13 +1019,13 @@ export default function ChatSidebar(): JSX.Element {
           {messages.length === 0 && !streaming && (
             <div className="chat-empty">
               <p>
-                <strong>Select text</strong> to make it the edit target, or leave the
-                selection empty to work on the <strong>whole document</strong>.
+                <strong>Select text</strong> to edit it, or ask about the{' '}
+                <strong>whole document</strong>.
               </p>
               <p className="chat-empty-sub">
-                The AI thinks out loud, then proposes edits as reviewable diffs —
-                nothing changes until you accept.
-                {!configured && ' (No model configured — open ⚙ to set up your API.)'}
+                The AI proposes edits as reviewable diffs — nothing changes
+                until you accept.
+                {!configured && ' No model configured — open ⚙ to set up your API.'}
               </p>
             </div>
           )}
@@ -1260,9 +1245,6 @@ function MessageBubble({
           className={`chat-step${s.depth ? ` chat-step--nested` : ''}`}
           key={s.at}
           style={s.depth ? {marginLeft: Math.min(s.depth, 3) * 14} : undefined}>
-          {s.kind !== 'remember' && (
-            <span className="chat-step-icon">{STEP_ICON[s.kind] ?? '🔧'}</span>
-          )}
           <span className="chat-step-text">{stepLabel(s)}</span>
           {s.hits !== undefined && (
             <span className="chat-step-hits">
@@ -1526,8 +1508,8 @@ function MemoryPanel({
             <div className="mem-toggle-label">Long-term memory</div>
             <div className="mem-toggle-hint">
               {enabled
-                ? 'On — the AI reads these notes before responding and can save new ones.'
-                : 'Off — the AI will not read or save memory.'}
+                ? 'The AI reads these notes before responding and can save new ones.'
+                : 'The AI will not read or save memory.'}
             </div>
           </div>
         </div>
@@ -1535,9 +1517,8 @@ function MemoryPanel({
         <div className="mem-list">
           {memories.length === 0 && (
             <div className="mem-empty">
-              No notes yet. When memory is on, the AI saves important project
-              context here as it works — including per-paper notes for uploaded
-              literature.
+              No notes yet. The AI saves important context here as it works —
+              including notes on uploaded papers.
             </div>
           )}
           {groupMemories(memories).map(group => (

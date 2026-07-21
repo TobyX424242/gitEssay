@@ -166,23 +166,26 @@ export default function AISettingsPanel({
             />
           </label>
 
-          <label className="ai-field ai-field--check">
-            <input
-              type="checkbox"
-              checked={draft.visionCapable}
-              onChange={e => set('visionCapable', e.target.checked)}
-            />
-            <span className="ai-label">
-              Model can see images (vision)
-              <span className="ai-hint">
-                let the agent look at figures extracted from literature
-              </span>
-            </span>
-          </label>
+          <div className="ai-toggle-row">
+            <label className="ai-switch">
+              <input
+                type="checkbox"
+                checked={draft.visionCapable}
+                onChange={e => set('visionCapable', e.target.checked)}
+              />
+              <span className="ai-switch-track" />
+            </label>
+            <div className="ai-toggle-text">
+              <div className="ai-toggle-label">Vision</div>
+              <div className="ai-toggle-hint">
+                The model can see images — lets the agent look at figures from
+                uploaded papers.
+              </div>
+            </div>
+          </div>
 
           <p className="ai-note ai-note--muted">
-            The agent runs on the LangGraph backend and needs a model/endpoint
-            that supports tool calling.
+            The model must support tool calling.
           </p>
 
           <button
@@ -210,9 +213,8 @@ export default function AISettingsPanel({
                 />
               </label>
               <p className="ai-note ai-note--muted">
-                Served from the same base URL via the OpenAI-compatible
-                /embeddings endpoint (OpenAI-format providers only). New uploads
-                are embedded automatically; leave blank for keyword-only search.
+                Enables semantic literature search (OpenAI-compatible
+                providers). Leave blank for keyword-only search.
               </p>
               <label className="ai-field">
                 <span className="ai-label">
@@ -231,10 +233,7 @@ export default function AISettingsPanel({
                 />
               </label>
               <label className="ai-field">
-                <span className="ai-label">
-                  Max input (tokens)
-                  <span className="ai-hint">soft truncation guard</span>
-                </span>
+                <span className="ai-label">Max input tokens</span>
                 <input
                   className="cp-input"
                   type="number"
@@ -247,10 +246,7 @@ export default function AISettingsPanel({
                 />
               </label>
               <label className="ai-field">
-                <span className="ai-label">
-                  Max output (tokens)
-                  <span className="ai-hint">sent as max_tokens</span>
-                </span>
+                <span className="ai-label">Max output tokens</span>
                 <input
                   className="cp-input"
                   type="number"
@@ -267,12 +263,11 @@ export default function AISettingsPanel({
 
           {!ready && (
             <p className="ai-note">
-              Until base URL, model, and an API key are set, AI requests will fail.
+              Set the base URL, model, and API key to start using the AI.
             </p>
           )}
           <p className="ai-note ai-note--muted">
-            The key is stored on the backend (not in the browser) and calls go
-            through it, so there's no CORS concern.
+            Your key is stored on the server, never in the browser.
           </p>
 
           {testResult && (

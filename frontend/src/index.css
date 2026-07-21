@@ -29,32 +29,10 @@ body {
   padding: 0 20px;
 }
 
-header {
-  max-width: 580px;
-  margin: auto;
-  position: relative;
-  display: flex;
-  justify-content: center;
-}
-
-header a {
-  max-width: 220px;
-  margin: 20px 0 0 0;
-  display: block;
-}
-
-header img {
-  display: block;
-  height: 100%;
-  width: 100%;
-}
-
-header h1 {
-  text-align: left;
-  color: #333;
-  display: inline-block;
-  margin: 20px 0 0 0;
-}
+/* NOTE: the Lexical playground's global `header {}` chrome rule was removed —
+   every <header> in gitEssay is a classed component header (.chat-header /
+   .mem-header / .dock-header), and the bare-element rule leaked margin:auto +
+   max-width into modal header bars, squashing them off-center. */
 
 .editor-shell {
   margin: 20px auto;

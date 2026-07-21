@@ -8,6 +8,7 @@
  * Download button for the original file.
  */
 import {type JSX, useEffect, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
 
 import Markdown from '../chat/Markdown';
 import {useActiveProjectId} from '../projects/projectStore';
@@ -210,16 +211,23 @@ export default function LiteraturePanel(): JSX.Element {
         </ul>
       )}
       {dragOver && <div className="lit-drop-hint">Drop to upload</div>}
-      {detailId && (
-        <LiteratureDetailModal lid={detailId} onClose={() => setDetailId(null)} />
-      )}
-      {pendingDelete && (
-        <DeleteConfirmModal
-          lit={pendingDelete}
-          onConfirm={confirmDelete}
-          onCancel={() => setPendingDelete(null)}
-        />
-      )}
+      {/* Modals are portaled to <body>: the dock's collapse animation keeps a
+          `transform` on an ancestor, which would otherwise trap the
+          position:fixed overlay inside the narrow dock. */}
+      {detailId &&
+        createPortal(
+          <LiteratureDetailModal lid={detailId} onClose={() => setDetailId(null)} />,
+          document.body,
+        )}
+      {pendingDelete &&
+        createPortal(
+          <DeleteConfirmModal
+            lit={pendingDelete}
+            onConfirm={confirmDelete}
+            onCancel={() => setPendingDelete(null)}
+          />,
+          document.body,
+        )}
     </div>
   );
 }
@@ -379,7 +387,7 @@ function LiteratureDetailModal({
             <div className="lit-detail-section">
               <div className="lit-detail-heading">AI summary</div>
               {detail.summary_status === 'generating' && (
-                <div className="lit-note">✍ The summarization subagent is writing…</div>
+                <div className="lit-note">✍ Writing the summary…</div>
               )}
               {detail.summary ? (
                 <div className="lit-summary">

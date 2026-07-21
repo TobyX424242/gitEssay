@@ -65,12 +65,56 @@
   flex-wrap: wrap;
 }
 
-.app-bar i {
-  background-size: contain;
+/* Icons render as CSS MASKS filled with currentColor, so they follow the
+   theme's text color in both light and dark mode — no black-SVG + invert()
+   hacks, and the disabled state is a clean muted tone instead of a murky
+   semi-transparent blend. (The same i.* classes keep their background-image
+   rendering in toolbars/dropdowns; only the app bar overrides.) */
+.app-bar .app-bar-btn i {
   display: inline-block;
   height: 16px;
   width: 16px;
   vertical-align: -0.2em;
+  background-color: currentColor;
+  background-image: none;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+.app-bar .app-bar-btn i.import {
+  -webkit-mask-image: url('../images/icons/upload.svg');
+  mask-image: url('../images/icons/upload.svg');
+}
+.app-bar .app-bar-btn i.export {
+  -webkit-mask-image: url('../images/icons/download.svg');
+  mask-image: url('../images/icons/download.svg');
+}
+.app-bar .app-bar-btn i.clear {
+  -webkit-mask-image: url('../images/icons/trash.svg');
+  mask-image: url('../images/icons/trash.svg');
+}
+.app-bar .app-bar-btn i.lock {
+  -webkit-mask-image: url('../images/icons/lock-fill.svg');
+  mask-image: url('../images/icons/lock-fill.svg');
+}
+.app-bar .app-bar-btn i.unlock {
+  -webkit-mask-image: url('../images/icons/lock.svg');
+  mask-image: url('../images/icons/lock.svg');
+}
+.app-bar .app-bar-btn i.versions {
+  -webkit-mask-image: url('../images/icons/clock-history.svg');
+  mask-image: url('../images/icons/clock-history.svg');
+}
+.app-bar .app-bar-btn i.literature {
+  -webkit-mask-image: url('../images/icons/journal-text.svg');
+  mask-image: url('../images/icons/journal-text.svg');
+}
+.app-bar .app-bar-btn i.rewrite {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1.2 9.5 6 14.4 7.5 9.5 9 8 13.8 6.5 9 1.6 7.5 6.5 6z'/%3E%3Cpath d='M12.7 9.5c.3.9.4 1 .9 1.3-.5.3-.6.4-.9 1.3-.3-.9-.4-1-.9-1.3.5-.3.6-.4.9-1.3z'/%3E%3Cpath d='M3.3 10c.2.6.3.7.6.8-.3.2-.4.3-.6.8-.2-.6-.3-.7-.6-.8.3-.2.4-.3.6-.8z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1.2 9.5 6 14.4 7.5 9.5 9 8 13.8 6.5 9 1.6 7.5 6.5 6z'/%3E%3Cpath d='M12.7 9.5c.3.9.4 1 .9 1.3-.5.3-.6.4-.9 1.3-.3-.9-.4-1-.9-1.3.5-.3.6-.4.9-1.3z'/%3E%3Cpath d='M3.3 10c.2.6.3.7.6.8-.3.2-.4.3-.6.8-.2-.6-.3-.7-.6-.8.3-.2.4-.3.6-.8z'/%3E%3C/svg%3E");
 }
 .app-bar-btn {
   border: 0;
@@ -87,26 +131,17 @@
   background: var(--ge-surface-2);
 }
 .app-bar-btn:disabled {
-  opacity: 0.4;
+  color: var(--ge-text-muted);
+  opacity: 0.55;
   cursor: not-allowed;
 }
 .app-bar-btn.is-active {
   background: var(--ge-accent);
-}
-.app-bar-btn.is-active i {
-  filter: brightness(0) invert(1);
+  color: #fff;
 }
 .app-bar-divider {
   width: 1px;
   height: 22px;
   background: var(--ge-border);
   margin: 0 6px;
-}
-
-[data-theme='dark'] .app-bar i {
-  filter: invert(1);
-}
-/* keep active (white-on-accent) icons white in dark mode too */
-[data-theme='dark'] .app-bar-btn.is-active i {
-  filter: brightness(0) invert(1);
 }
