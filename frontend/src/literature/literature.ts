@@ -19,6 +19,15 @@ export type SummaryStatus = 'none' | 'generating' | 'ready' | 'failed' | 'skippe
 /** Embedding indexing outcome (failed = keyword search only). */
 export type EmbedStatus = 'none' | 'disabled' | 'ok' | 'failed';
 
+/** Engine that produced the parsed chunks (null = DOCX / pre-migration row). */
+export type ParseEngine = 'edgeparse' | 'docling' | null;
+
+/** Auditor verdict on the extraction quality (none = not audited). */
+export type ParseConfidence = 'none' | 'reliable' | 'partial' | 'unreliable';
+
+/** Live stage of the two-tier PDF parse while status === 'processing'. */
+export type ParsePhase = 'fast_extract' | 'evaluating' | 'ocr_fallback' | null;
+
 export interface Literature {
   id: string;
   project_id: string;
@@ -35,6 +44,11 @@ export interface Literature {
   embed_status: EmbedStatus;
   /** Parse progress 0..1 while processing (PDFs); null = indeterminate. */
   progress: number | null;
+  parse_engine: ParseEngine;
+  parse_confidence: ParseConfidence;
+  parse_phase: ParsePhase;
+  /** Short auditor note (verdict reason) — shown as the confidence tooltip. */
+  parse_eval_note: string | null;
   created_at: number;
 }
 
@@ -137,9 +151,12 @@ export async function deleteLiterature(id: string): Promise<void> {
 }
 
 /** Re-run parsing from the still-on-disk original (after a failure or an
- * interrupted run). The row flips back to `processing` and polling resumes. */
-export async function reparseLiterature(lid: string): Promise<Literature> {
-  const lit = await api.post<Literature>(`/literature/${lid}/reparse`);
+ * interrupted run). The row flips back to `processing` and polling resumes.
+ * `force` (PDFs): skip the edgeparse fast tier and parse directly with the
+ * heavy OCR pipeline — the quality evaluation re-runs and the summary
+ * regenerates automatically on success. */
+export async function reparseLiterature(lid: string, force = false): Promise<Literature> {
+  const lit = await api.post<Literature>(`/literature/${lid}/reparse${force ? '?force=true' : ''}`);
   emit();
   return lit;
 }

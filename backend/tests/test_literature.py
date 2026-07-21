@@ -231,13 +231,15 @@ def test_ingest_writes_progress_to_db(client, project, db, monkeypatch):
 
     monkeypatch.setattr(literature_ingest, "_extract", fake_extract)
     monkeypatch.setattr("app.routers.literature.start_ingest", lambda lid: None)
+    # The fake bytes aren't a real PDF, so edgeparse fails and this parse goes
+    # through the OCR-fallback path, whose progress window is [0.4, 1.0].
     r = client.post(
         f"/api/projects/{project['id']}/literature",
         files={"file": ("p.pdf", b"%PDF x", "application/pdf")},
     )
     lid_ref = [r.json()["id"]]
     ingest(db, lid_ref[0])
-    assert seen == [0.5]  # mid-parse progress was committed and visible
+    assert seen == [0.7]  # 0.4 + 0.6 * (5/10): mid-parse progress in the fallback window
     assert db.get(Literature, lid_ref[0]).progress == 1.0
 
 
@@ -257,7 +259,13 @@ def test_page_count_reads_pdf(tmp_path):
 
 # --- real docling smoke (opt-in) ----------------------------------------------------
 @pytest.mark.skipif(os.environ.get("GE_TEST_DOCLING") != "1", reason="docling smoke is opt-in (GE_TEST_DOCLING=1)")
-def test_real_docling_parses_pdf(client, project, db, tmp_path):
+def test_real_docling_parses_pdf(client, project, db, tmp_path, monkeypatch):
+    # Force the OCR-fallback tier: a real born-digital PDF would be handled by
+    # edgeparse now — this smoke test exists to prove the docling path works.
+    monkeypatch.setattr(
+        "app.pdf_fast.extract_fast",
+        lambda *a, **_: (_ for _ in ()).throw(RuntimeError("forced fallback")),
+    )
     from reportlab.lib.pagesizes import letter
     from reportlab.pdfgen import canvas
 

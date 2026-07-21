@@ -31,7 +31,16 @@ const ACCEPT = '.pdf,.docx';
 
 function statusBadge(lit: Literature): JSX.Element {
   if (lit.status === 'processing') {
-    return <span className="lit-badge lit-badge--processing">parsing…</span>;
+    // Two-tier PDF parse stages (parse_phase is null for DOCX / old rows).
+    const label =
+      lit.parse_phase === 'fast_extract'
+        ? 'fast parsing…'
+        : lit.parse_phase === 'evaluating'
+          ? 'evaluating…'
+          : lit.parse_phase === 'ocr_fallback'
+            ? 'deep OCR parse…'
+            : 'parsing…';
+    return <span className="lit-badge lit-badge--processing">{label}</span>;
   }
   if (lit.status === 'error') {
     return (
@@ -44,6 +53,154 @@ function statusBadge(lit: Literature): JSX.Element {
     return <span className="lit-badge lit-badge--processing">summarizing…</span>;
   }
   return <span className="lit-badge lit-badge--ready">ready</span>;
+}
+
+/** Canned, per-level explanation shown in the confidence popover — the
+ * "formulaic" part; the auditor's own note (LLM-written or heuristic) is
+ * appended underneath when present. */
+const CONF_EXPLANATIONS: Record<string, {title: string; body: string}> = {
+  reliable: {
+    title: 'Reliable extraction',
+    body: 'Automated checks (text density, character integrity) and the AI auditor found no significant defects. Reading order, characters and structure look intact — safe to search, quote and cite.',
+  },
+  partial: {
+    title: 'Partially reliable',
+    body: 'The document is usable overall, but the AI auditor found minor localized issues (e.g. a broken table or occasional odd lines). Glance at the original before quoting exact numbers or tables.',
+  },
+  unreliable: {
+    title: 'Unreliable extraction',
+    body: 'The extracted text looks damaged (garbled characters, interleaved columns, or missing body text). Treat search hits and citations from this document with caution.',
+  },
+};
+
+/** Parse-confidence tag with a "?" that opens a centered explanation modal
+ * (only for audited, ready documents). The modal combines the canned
+ * per-level explanation with the engine that produced the parse and the
+ * auditor's own note. Portaled to <body>: the tag can live inside the narrow
+ * dock or the detail modal, whose stacking/transform contexts would clip an
+ * inline popover. */
+function ConfidenceTag({lit}: {lit: Literature}): JSX.Element | null {
+  const [open, setOpen] = useState(false);
+  if (lit.status !== 'ready' || lit.parse_confidence === 'none') {
+    return null;
+  }
+  return (
+    <span className="lit-conf">
+      <span className={`lit-badge lit-badge--conf-${lit.parse_confidence}`}>
+        {lit.parse_confidence}
+      </span>
+      <span
+        className="lit-conf-help"
+        role="button"
+        tabIndex={0}
+        title="What does this confidence label mean?"
+        onClick={e => {
+          e.stopPropagation();
+          setOpen(true);
+        }}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.stopPropagation();
+            setOpen(true);
+          }
+        }}>
+        ?
+      </span>
+      {open &&
+        createPortal(<ConfidenceModal lit={lit} onClose={() => setOpen(false)} />, document.body)}
+    </span>
+  );
+}
+
+/** Centered, opaque explanation modal (same mem-overlay/mem-panel chrome as
+ * the settings/delete modals). Escape or backdrop click closes it. */
+function ConfidenceModal({lit, onClose}: {lit: Literature; onClose: () => void}): JSX.Element {
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    closeRef.current?.focus();
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const info = CONF_EXPLANATIONS[lit.parse_confidence];
+  const icon =
+    lit.parse_confidence === 'reliable'
+      ? '✓'
+      : lit.parse_confidence === 'partial'
+        ? '⚠'
+        : '✕';
+  const engineLine =
+    lit.parse_engine === 'edgeparse'
+      ? 'edgeparse — fast, OCR-free'
+      : lit.parse_engine === 'docling'
+        ? 'docling — OCR fallback (slow path)'
+        : null;
+  return (
+    <div className="mem-overlay" onClick={onClose}>
+      <div
+        className="mem-panel lit-conf-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Parse confidence explanation"
+        onClick={e => e.stopPropagation()}>
+        <header className="mem-header">
+          <span className="mem-title">
+            Parse confidence:{' '}
+            <span className={`lit-badge lit-badge--conf-${lit.parse_confidence}`}>
+              {lit.parse_confidence}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="mem-close"
+            ref={closeRef}
+            onClick={onClose}
+            aria-label="Close">
+            ✕
+          </button>
+        </header>
+        <div className="lit-conf-modal-body">
+          <div
+            className={`lit-conf-modal-banner lit-conf-modal-banner--${lit.parse_confidence}`}>
+            <span className="lit-conf-modal-icon" aria-hidden="true">
+              {icon}
+            </span>
+            <div className="lit-conf-modal-banner-text">
+              <div className="lit-conf-modal-level">{info.title}</div>
+              <p className="lit-conf-modal-text">{info.body}</p>
+              {lit.parse_confidence === 'unreliable' && lit.parse_engine === 'docling' && (
+                <p className="lit-conf-modal-text">
+                  This document was already re-parsed with OCR and still looks wrong —
+                  consider re-uploading a clearer file, or ↻ Retry parsing.
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="lit-conf-modal-meta">
+            <span className="lit-conf-modal-label">Document</span>
+            <span className="lit-conf-modal-value" title={lit.title}>
+              {lit.title}
+            </span>
+            {engineLine && (
+              <>
+                <span className="lit-conf-modal-label">Parser</span>
+                <span className="lit-conf-modal-value">{engineLine}</span>
+              </>
+            )}
+          </div>
+          <div className="lit-conf-modal-note">
+            <div className="lit-conf-modal-note-heading">AI Auditor's note</div>
+            {lit.parse_eval_note ?? 'No specific issues were recorded.'}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function LiteraturePanel(): JSX.Element {
@@ -157,6 +314,7 @@ export default function LiteraturePanel(): JSX.Element {
                 </div>
                 <div className="lit-item-sub">
                   {statusBadge(lit)}
+                  <ConfidenceTag lit={lit} />
                   {lit.status === 'ready' && (
                     <span className="lit-meta">
                       {lit.page_count}p · {lit.chunk_count} chunks · {lit.image_count}{' '}
@@ -372,6 +530,7 @@ function LiteratureDetailModal({
           <div className="lit-detail-body">
             <div className="lit-detail-meta">
               {statusBadge(detail)}
+              <ConfidenceTag lit={detail} />
               <span className="lit-meta">
                 {detail.filename} · {detail.page_count}p · {detail.chunk_count} chunks ·{' '}
                 {detail.image_count} figures
@@ -450,6 +609,23 @@ function LiteratureDetailModal({
                   ↻ Regenerate summary
                 </button>
               )}
+              {/* Force OCR only makes sense for fast-path (edgeparse) PDFs,
+                  or as an escape hatch for failed parses — a document already
+                  OCR'd (docling, incl. pre-migration rows) gains nothing. */}
+              {detail.filename.toLowerCase().endsWith('.pdf') &&
+                (detail.parse_engine === 'edgeparse' || detail.status === 'error') && (
+                  <button
+                    type="button"
+                    className="cp-button cp-button--ghost"
+                    title="Re-parse with the heavy OCR engine, skipping the fast path — the quality evaluation and AI summary are re-run afterwards"
+                    onClick={() =>
+                      reparseLiterature(lid, true).catch(e =>
+                        setError(e instanceof Error ? e.message : String(e)),
+                      )
+                    }>
+                    Force OCR
+                  </button>
+                )}
             </>
           )}
         </footer>

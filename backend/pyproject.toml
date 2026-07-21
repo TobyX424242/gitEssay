@@ -25,6 +25,7 @@ dependencies = [
     # build has the same API minus the GUI — see the override below, which
     # prunes opencv-python from the resolution.
     "opencv-python-headless>=4.10",
+    "edgeparse>=0.2.5",
 ]
 
 [dependency-groups]

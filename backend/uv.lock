@@ -559,6 +559,34 @@ wheels = [
 ]
 
 [[package]]
+name = "edgeparse"
+version = "0.2.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/18/8262b7121f18667879854b6d1bc623ff8b8cb8ca57c3750a3d44e12bebc9/edgeparse-0.2.5.tar.gz", hash = "sha256:46c4b84c5a8f5e85a1699614360037535bf2aba15c5b7a4db3aec37865038935", size = 7948863, upload-time = "2026-04-14T00:34:23.263Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e3/d9/755b073459ea5ec93e7df01d00eeac8976c7ad814511ed426072ef0ce4aa/edgeparse-0.2.5-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:b00fe793089ae8d120b0e967eb3999c31ad576133d65e7fa06622ee8c2083114", size = 4361267, upload-time = "2026-04-14T00:33:48.238Z" },
+    { url = "https://files.pythonhosted.org/packages/99/9a/18a6039e7f791d457d3148a3724ee3766b5b398ad7f35e85ab2b215b8d89/edgeparse-0.2.5-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:d7ee4562548a832164d00e3a505360af6a0dd7e9114dcd5c8872046657aa08de", size = 4055583, upload-time = "2026-04-14T00:33:50.139Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/76/2087a8265ec5ca2901357ee4ebd2ce5edd554b5c9282494783dc57e42038/edgeparse-0.2.5-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:83c4affb43434cfc24c9e3e47d0004d022bce64ce75a8b44095b2e45e85b2394", size = 4168958, upload-time = "2026-04-14T00:33:51.655Z" },
+    { url = "https://files.pythonhosted.org/packages/34/ab/ccd269c6f0786314b885f450e7cade61e3e1d2670d006ca4ea6fd26b318f/edgeparse-0.2.5-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:027e534891bcb1f5e3388cdd6680f2655e26d31f65ab257fddd931bf60836beb", size = 4548520, upload-time = "2026-04-14T00:33:53.255Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/8a/b1bbcd25c71f70255101ffa44dbd7914fac68ec94fe52be0489eca921a1d/edgeparse-0.2.5-cp310-cp310-win_amd64.whl", hash = "sha256:0e76ec294b14fdd4c4c1ce866aaa244a47835071d5e8e8ab1ae5930dfcb17fa7", size = 4576786, upload-time = "2026-04-14T00:33:55.175Z" },
+    { url = "https://files.pythonhosted.org/packages/47/3c/f7c7b0d57dfc85e3955d0c2e89bbb7be86b217fbbd2453397a17a303028f/edgeparse-0.2.5-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:650751c18f9cdc184a16ea36da14b3978bd1509a6b629a0358443331fb5412ea", size = 4361432, upload-time = "2026-04-14T00:33:57.245Z" },
+    { url = "https://files.pythonhosted.org/packages/81/51/5fd9b02e6e60e7c6bae60d8c96ac51003f9309856bd4deef27fa67cd3db0/edgeparse-0.2.5-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:e8f0c740c57837d2615248c80d6c68aeef56102c4e76b92e5c84d618d1160261", size = 4055719, upload-time = "2026-04-14T00:33:58.951Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/32/61c62025450d7c7ccc944f389a587f14f74886bf7d2e640cb97519d2a731/edgeparse-0.2.5-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:9825a9454ee6b624f84237cf1e360165dbd70822eed6cc4095798ae0b6881174", size = 4169147, upload-time = "2026-04-14T00:34:00.759Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/cb/6a6e7dee986a13493ddd2f57687f11a77db7ab9979e7d31da204e92ee5c0/edgeparse-0.2.5-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9ec549ffa66c22632065bfb280077f5f2a97fc5a73944bcf74ebf946b67b791b", size = 4548230, upload-time = "2026-04-14T00:34:02.591Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/d9/9e9bc2a2a3bacf6f3ed860f8418f878238691cc55f217743d202c6558199/edgeparse-0.2.5-cp311-cp311-win_amd64.whl", hash = "sha256:d48908f3670259a7875f8037924f27ef422e99ac31f2cfdd4e8355a7047f1ce6", size = 4576525, upload-time = "2026-04-14T00:34:04.133Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/5e/1a99ea177c8f46f04b8611f55c3a02d30465424cc8c072081f7623bd04b0/edgeparse-0.2.5-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:ac6ea0081c75b9b83fb7c5f66b9070262de062e2ade66311dd422cf69a23ec25", size = 4361038, upload-time = "2026-04-14T00:34:06.064Z" },
+    { url = "https://files.pythonhosted.org/packages/85/26/0fcb829043ea9de9b5e4771294a027dca47fdf7b4cb7211f6035092d1082/edgeparse-0.2.5-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:82a6fdd81f2bfac4a3b8aedd06e055ae67ec8a2d1c879fb6327259caa13f5a69", size = 4055477, upload-time = "2026-04-14T00:34:07.73Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/85/7cf8e092dfd721e3a08e322df46aa71ef01212f2e8269529dfd1fadbb3b6/edgeparse-0.2.5-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d4aeb5c8fbfcc007a7029cc63f908070e43e58fea1c90af64a83b5456d521b92", size = 4168721, upload-time = "2026-04-14T00:34:09.332Z" },
+    { url = "https://files.pythonhosted.org/packages/93/28/ba43e51eb931435b338dfbf3444977ba72b4dfbb4e674b31c70879ca70c8/edgeparse-0.2.5-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:77c6e82556cccd02e84b96149a98416559dde7456b1cbe83ac92dc9429531e38", size = 4547130, upload-time = "2026-04-14T00:34:11.329Z" },
+    { url = "https://files.pythonhosted.org/packages/be/91/4bbe82607b6d0941345b14de6d14a740ec185153663bccbe6087fcd60d2c/edgeparse-0.2.5-cp312-cp312-win_amd64.whl", hash = "sha256:31baa98d1836b8c8475bac71c5b649f723c764b7dd59b18409f1487649e7bef6", size = 4576780, upload-time = "2026-04-14T00:34:13.065Z" },
+    { url = "https://files.pythonhosted.org/packages/40/f5/b091a625f59daeeb36b25b2f378348ab0fcaa62bec705930cb97b733bc63/edgeparse-0.2.5-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:25ee2dec1c76f2e18d5022f85a18e37e854be9f2cb538a6cc00f20d621eb1f8b", size = 4361037, upload-time = "2026-04-14T00:34:14.552Z" },
+    { url = "https://files.pythonhosted.org/packages/75/7b/58574b1efa28a3a48a99dc97656de3d64377d6973056b437ec5f497ebb55/edgeparse-0.2.5-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:381e0fbafde905545a31336d927b7891c1378d5931559dd01de08ea556b48e29", size = 4055475, upload-time = "2026-04-14T00:34:16.284Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/58/b88fcb0797e9603ab216210d1f054f1acc922dc246d1ea353793908a2418/edgeparse-0.2.5-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:18d421c9dca9e4da1dffdf9a0e2c30e0b9970ec75430e9545ef12078e0b8f143", size = 4168683, upload-time = "2026-04-14T00:34:18.156Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/8a/f77b5343562b65c3b33036165cfd4f27066c001c94242cf2fe930b018d41/edgeparse-0.2.5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:bd27c59cd7064c1c2e49b344f46a692919e58788f855e4770b589143cbd564de", size = 4546919, upload-time = "2026-04-14T00:34:19.682Z" },
+    { url = "https://files.pythonhosted.org/packages/43/42/ee5aa138f37e906c9e13ee665466744167795aaed99473eab335f50469db/edgeparse-0.2.5-cp313-cp313-win_amd64.whl", hash = "sha256:57556cd93482c8f7e33a05abfc9cddef0a32607e327369c14fadd292bd8e3738", size = 4576772, upload-time = "2026-04-14T00:34:21.459Z" },
+]
+
+[[package]]
 name = "et-xmlfile"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -640,6 +668,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "docling" },
+    { name = "edgeparse" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "langchain" },
@@ -674,6 +703,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "docling", specifier = ">=2.113.0" },
+    { name = "edgeparse", specifier = ">=0.2.5" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "langchain", specifier = ">=1.3.11" },

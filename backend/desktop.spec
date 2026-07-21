@@ -23,6 +23,7 @@ for pkg in (
     "docling_parse",
     "docling_ibm_models",
     "rapidocr",  # OCR configs + bundled .onnx models (default_models.yaml)
+    "edgeparse",  # tier-1 PDF parser: PyO3 native extension (.so/.pyd)
 ):
     try:
         d, b, h = collect_all(pkg)

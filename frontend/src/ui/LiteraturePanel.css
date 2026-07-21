@@ -230,6 +230,158 @@
   background: rgba(230, 96, 96, 0.2);
   color: #6e1f1f;
 }
+/* parse-confidence tags (audited extractions) */
+.lit-badge--conf-reliable {
+  background: rgba(86, 200, 130, 0.2);
+  color: #1d5135;
+}
+.lit-badge--conf-partial {
+  background: rgba(255, 180, 60, 0.25);
+  color: #7a4d00;
+}
+.lit-badge--conf-unreliable {
+  background: rgba(230, 96, 96, 0.2);
+  color: #6e1f1f;
+}
+/* confidence "?" trigger */
+.lit-conf {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.lit-conf-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ge-text-muted, #888);
+  border: 1px solid var(--ge-border, #ccc);
+  cursor: pointer;
+  user-select: none;
+}
+.lit-conf-help:hover {
+  color: var(--ge-text, #333);
+  border-color: var(--ge-text-muted, #999);
+}
+/* centered confidence explanation modal (reuses mem-overlay/mem-panel chrome) */
+.lit-conf-modal {
+  width: min(440px, 92vw);
+}
+.lit-conf-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-y: auto;
+}
+/* verdict banner: tinted per level, colored left rail, leading icon */
+.lit-conf-modal-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  border-left-width: 3px;
+}
+.lit-conf-modal-banner--reliable {
+  background: rgba(86, 200, 130, 0.1);
+  border-color: rgba(86, 200, 130, 0.3);
+  border-left-color: #3caa72;
+}
+.lit-conf-modal-banner--partial {
+  background: rgba(255, 180, 60, 0.1);
+  border-color: rgba(255, 180, 60, 0.3);
+  border-left-color: #d99a26;
+}
+.lit-conf-modal-banner--unreliable {
+  background: rgba(230, 96, 96, 0.1);
+  border-color: rgba(230, 96, 96, 0.3);
+  border-left-color: #d64545;
+}
+.lit-conf-modal-icon {
+  flex: none;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.lit-conf-modal-banner--reliable .lit-conf-modal-icon {
+  color: #2e8b5e;
+}
+.lit-conf-modal-banner--partial .lit-conf-modal-icon {
+  color: #b37a12;
+}
+.lit-conf-modal-banner--unreliable .lit-conf-modal-icon {
+  color: #c23934;
+}
+.lit-conf-modal-banner-text {
+  min-width: 0;
+}
+.lit-conf-modal-level {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.lit-conf-modal-text {
+  margin: 0;
+}
+.lit-conf-modal-text + .lit-conf-modal-text {
+  margin-top: 6px;
+}
+/* label/value meta rows */
+.lit-conf-modal-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  padding: 0 2px;
+  align-items: baseline;
+}
+.lit-conf-modal-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ge-text-muted, #888);
+}
+.lit-conf-modal-value {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* auditor's note card */
+.lit-conf-modal-note {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--ge-border, #ddd);
+  background: var(--ge-surface-2, #f6f6f6);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.lit-conf-modal-note-heading {
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ge-text-muted, #888);
+  margin-bottom: 4px;
+}
+[data-theme='dark'] .lit-conf-modal-banner--reliable .lit-conf-modal-icon {
+  color: #7fd6a4;
+}
+[data-theme='dark'] .lit-conf-modal-banner--partial .lit-conf-modal-icon {
+  color: #ffd58a;
+}
+[data-theme='dark'] .lit-conf-modal-banner--unreliable .lit-conf-modal-icon {
+  color: #f0a9a9;
+}
 .lit-delete {
   flex: none;
 }
@@ -287,10 +439,15 @@
 [data-theme='dark'] .lit-drop-hint {
   background: rgba(20, 20, 20, 0.7);
 }
-[data-theme='dark'] .lit-badge--ready {
+[data-theme='dark'] .lit-badge--ready,
+[data-theme='dark'] .lit-badge--conf-reliable {
   color: #9fe6b8;
 }
-[data-theme='dark'] .lit-badge--error {
+[data-theme='dark'] .lit-badge--conf-partial {
+  color: #ffd58a;
+}
+[data-theme='dark'] .lit-badge--error,
+[data-theme='dark'] .lit-badge--conf-unreliable {
   color: #f0a9a9;
 }
 @keyframes lit-pulse {
