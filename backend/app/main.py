@@ -82,6 +82,11 @@ def _migrate() -> None:
             "progress": "REAL",
             "parse_attempts": "INTEGER NOT NULL DEFAULT 0",
             "embed_status": "VARCHAR NOT NULL DEFAULT 'none'",
+            "parse_engine": "VARCHAR",
+            "parse_confidence": "VARCHAR NOT NULL DEFAULT 'none'",
+            "parse_phase": "VARCHAR",
+            "parse_eval_note": "TEXT",
+            "parse_force_ocr": "BOOLEAN NOT NULL DEFAULT 0",
         },
     }
     with engine.connect() as conn:
@@ -117,10 +122,12 @@ def _resume_interrupted() -> None:
             if has_original and (lit.parse_attempts or 0) < _MAX_AUTO_RESUME_ATTEMPTS:
                 lit.progress = None
                 lit.error = None
+                lit.parse_phase = None
                 reparse_ids.append(lit.id)
             else:
                 lit.status = "error"
                 lit.progress = None
+                lit.parse_phase = None
                 lit.error = (
                     "Parsing was interrupted by app restart"
                     + (" and the original file is missing (re-upload)" if not has_original else "")

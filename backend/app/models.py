@@ -124,6 +124,21 @@ class Literature(Base):
     # Parse progress 0..1 (PDFs, from per-segment conversion); NULL =
     # indeterminate (DOCX, or not started). Meaningful only while processing.
     progress = Column(Float, nullable=True)
+    # Two-tier PDF parsing (see literature_ingest/pdf_fast/parse_eval):
+    # parse_engine: engine that produced the current chunks — edgeparse (fast,
+    # no OCR) | docling (OCR fallback) | NULL (DOCX / pre-migration rows).
+    parse_engine = Column(String, nullable=True)
+    # parse_confidence: auditor verdict — none | reliable | partial | unreliable.
+    parse_confidence = Column(String, nullable=False, default="none")
+    # parse_phase: live stage while status=processing — fast_extract |
+    # evaluating | ocr_fallback; NULL when done / not a tiered parse.
+    parse_phase = Column(String, nullable=True)
+    # Short auditor note (verdict reason), surfaced as the confidence tooltip.
+    parse_eval_note = Column(Text, nullable=True)
+    # One-shot flag set by POST /literature/{id}/reparse?force=true: the next
+    # ingest skips the edgeparse tier and goes straight to the docling OCR
+    # path. Cleared by the ingest that consumes it.
+    parse_force_ocr = Column(Boolean, nullable=False, default=False)
     page_count = Column(Integer, nullable=False, default=0)
     char_count = Column(Integer, nullable=False, default=0)
     chunk_count = Column(Integer, nullable=False, default=0)

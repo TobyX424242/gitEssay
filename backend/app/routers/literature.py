@@ -55,6 +55,10 @@ def _to_out(db: Session, lit: Literature) -> dict:
         "summary_status": lit.summary_status or "none",
         "embed_status": lit.embed_status or "none",
         "progress": lit.progress,
+        "parse_engine": lit.parse_engine,
+        "parse_confidence": lit.parse_confidence or "none",
+        "parse_phase": lit.parse_phase,
+        "parse_eval_note": lit.parse_eval_note,
         "created_at": lit.created_at,
     }
 
@@ -166,10 +170,14 @@ def regenerate_summary(lid: str, db: Session = Depends(get_db)):
 
 
 @router.post("/literature/{lid}/reparse", response_model=schemas.LiteratureOut)
-def reparse_literature(lid: str, db: Session = Depends(get_db)):
+def reparse_literature(lid: str, force: bool = False, db: Session = Depends(get_db)):
     """Re-run parsing from the still-on-disk original — after a failure, an
     interrupted run, or a docling upgrade. Clears all derived artifacts (chunks,
-    FTS rows, images, summary) first; a parse is all-or-nothing."""
+    FTS rows, images, summary) first; a parse is all-or-nothing.
+
+    `?force=true` (PDFs): skip the edgeparse fast tier and parse directly with
+    the heavy docling OCR pipeline (the quality evaluation still runs, and the
+    summary regenerates automatically on success)."""
     lit = _get_literature_or_404(db, lid)
     if lit.status == "processing":
         raise HTTPException(status_code=409, detail="already parsing")
@@ -193,6 +201,11 @@ def reparse_literature(lid: str, db: Session = Depends(get_db)):
     lit.summary_status = "none"
     lit.embed_status = "none"
     lit.parse_attempts = 0
+    lit.parse_engine = None
+    lit.parse_confidence = "none"
+    lit.parse_phase = None
+    lit.parse_eval_note = None
+    lit.parse_force_ocr = force
     db.commit()
     start_ingest(lid)
     return _to_out(db, lit)

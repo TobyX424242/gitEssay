@@ -122,6 +122,13 @@ class LiteratureOut(BaseModel):
     embed_status: str = "none"
     # Parse progress 0..1 while processing (PDFs); null = indeterminate
     progress: Optional[float] = None
+    # Two-tier parse metadata: engine that produced the chunks (edgeparse |
+    # docling | null), auditor confidence (none | reliable | partial |
+    # unreliable), live phase while processing, and the auditor's note.
+    parse_engine: Optional[str] = None
+    parse_confidence: str = "none"
+    parse_phase: Optional[str] = None
+    parse_eval_note: Optional[str] = None
     created_at: int
 
     model_config = ConfigDict(from_attributes=True)

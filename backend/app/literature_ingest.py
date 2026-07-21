@@ -1,9 +1,13 @@
-"""gitEssay backend — literature ingestion: PDF/DOCX → chunks + images (docling).
+"""gitEssay backend — literature ingestion: PDF/DOCX → chunks + images.
 
 Upload flow: the router saves the original file and a `processing` row, then
-`start_ingest` parses it on a daemon thread (docling conversion is slow, and
-its first run downloads layout models). On success the row becomes `ready`
-with denormalized counts; on failure `error` with the exception message.
+`start_ingest` parses it on a daemon thread. PDFs go through a TWO-TIER parse:
+edgeparse first (pdf_fast.py — Rust, no OCR, milliseconds), audited by the
+parse evaluator (parse_eval.py); only when the audit judges the result
+unreliable does the heavy docling+RapidOCR pipeline run as fallback (and is
+audited once more, for the confidence label only). DOCX still goes straight
+to docling. On success the row becomes `ready` with denormalized counts; on
+failure `error` with the exception message.
 
 `_extract()` is the testable seam — tests monkeypatch it so the suite never
 needs docling's models. A real-docling smoke test lives behind GE_TEST_DOCLING=1.
@@ -238,6 +242,68 @@ def _split_chunk(c: ExtractedChunk) -> list[ExtractedChunk]:
     return [ExtractedChunk(c.heading, t) for t in final]
 
 
+# --- two-tier PDF parse (edgeparse fast path → docling OCR fallback) --------
+def _extract_pdf_tiered(db: Session, lit: Literature, path: str, progress_frac) -> ExtractedDoc:
+    """Fast edgeparse pass first; the parse evaluator (parse_eval.py) audits
+    the result, and only an `unreliable` verdict (or an edgeparse failure)
+    triggers the heavy docling OCR fallback. The fallback result is audited
+    once more — that verdict sets the confidence label but never loops.
+
+    `progress_frac(frac)` reports monotone progress: fast pass occupies
+    [0.05, 0.3], evaluation 0.3→0.4, OCR fallback [0.4, 1.0]. A forced OCR
+    reparse (lit.parse_force_ocr, one-shot) skips the fast tier entirely and
+    the OCR pass owns the full [0.05, 1.0] window.
+
+    Imported lazily: pdf_fast/parse_eval import dataclasses from THIS module.
+    """
+    from app.parse_eval import evaluate_parse
+    from app.pdf_fast import extract_fast
+
+    def _phase(phase: str, frac: float) -> None:
+        lit.parse_phase = phase
+        progress_frac(frac)
+
+    forced = bool(lit.parse_force_ocr)
+    if forced:
+        # One-shot: a later plain reparse uses the fast path again.
+        lit.parse_force_ocr = False
+
+    extracted = None
+    if not forced:
+        _phase("fast_extract", 0.05)
+        try:
+            extracted = extract_fast(path, lit.filename)
+        except Exception:  # noqa: BLE001 — any fast-path failure falls back to OCR
+            log.exception("edgeparse failed, falling back to docling OCR: %s", lit.filename)
+        if extracted is not None:
+            _phase("evaluating", 0.3)
+            res = evaluate_parse(db, extracted.chunks, extracted.page_count, lit.filename)
+            if res.verdict != "unreliable":
+                lit.parse_engine = "edgeparse"
+                lit.parse_confidence = res.verdict
+                lit.parse_eval_note = res.note
+                return extracted
+            log.info(
+                "fast parse judged unreliable (%s); falling back to OCR: %s",
+                res.note,
+                lit.filename,
+            )
+
+    lo = 0.05 if forced else 0.4
+    _phase("ocr_fallback", lo)
+
+    def _scaled(done: int, total: int) -> None:
+        progress_frac(min(lo + (1.0 - lo) * (done / total), 1.0) if total else None)
+
+    extracted = _extract(path, lit.filename, on_progress=_scaled)
+    res2 = evaluate_parse(db, extracted.chunks, extracted.page_count, lit.filename)
+    lit.parse_engine = "docling"
+    lit.parse_confidence = res2.verdict
+    prefix = "Forced OCR" if forced else "OCR fallback"
+    lit.parse_eval_note = (f"{prefix} — {res2.note}" if res2.note else prefix)[:300]
+    return extracted
+
+
 # --- ingest driver -----------------------------------------------------------
 def start_ingest(literature_id: str) -> None:
     threading.Thread(target=_ingest_safe, args=(literature_id,), daemon=True).start()
@@ -263,6 +329,7 @@ def _ingest_safe(literature_id: str) -> None:
                     lit.status = "error"
                     lit.error = f"{type(e).__name__}: {e}"[:2000]
                     lit.progress = None
+                    lit.parse_phase = None
                     lit.embed_status = "none"
                     fresh.commit()
         except Exception:  # noqa: BLE001
@@ -285,14 +352,25 @@ def ingest(db: Session, literature_id: str) -> None:
     if not originals:
         raise FileNotFoundError("original upload missing")
 
-    def _progress(done: int, total: int) -> None:
+    def _progress_frac(frac) -> None:
+        """Best-effort monotone progress write (frac 0..1 or None)."""
         try:
-            lit.progress = min(done / total, 1.0) if total else None
+            lit.progress = frac
             db.commit()
         except Exception:  # noqa: BLE001 — never fail a parse over progress
             db.rollback()
 
-    extracted = _extract(originals[0], lit.filename, on_progress=_progress)
+    def _progress(done: int, total: int) -> None:
+        _progress_frac(min(done / total, 1.0) if total else None)
+
+    if os.path.splitext(originals[0])[1].lower() == ".pdf":
+        # Two-tier parse: fast edgeparse + quality audit, OCR fallback only
+        # when the audit judges the fast result unreliable. Sets parse_engine /
+        # parse_confidence / parse_eval_note as a side effect.
+        extracted = _extract_pdf_tiered(db, lit, originals[0], _progress_frac)
+    else:
+        # DOCX: straight to docling, no audit (no tier-1 exists for it).
+        extracted = _extract(originals[0], lit.filename, on_progress=_progress)
     if not extracted.chunks:
         raise RuntimeError(
             "no extractable text found (empty document or image-only scan)"
@@ -361,6 +439,7 @@ def ingest(db: Session, literature_id: str) -> None:
     lit.status = "ready"
     lit.error = None
     lit.progress = 1.0
+    lit.parse_phase = None
     db.commit()
     # Auto-summarize in the background (skipped inside when AI is unconfigured).
     # Isolated: a failure here must not drag the (already ready) document down
