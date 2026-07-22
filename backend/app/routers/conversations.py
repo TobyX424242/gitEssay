@@ -161,19 +161,19 @@ def set_edit_state(
             raise HTTPException(status_code=404, detail="conversation not found")
         msgs = json.loads(conv.messages)
         applied = False
-        # kind="eq" targets the message's eqEdits (equation patches); the default
-        # "text" targets edits. Equation entries can also carry prevLatex (for
-        # retry reverts) and failReason (invalid-LaTeX rejections).
-        field = "eqEdits" if body.kind == "eq" else "edits"
+        # kind="eq" targets the message's eqEdits (equation patches), kind="append"
+        # its appendEdits; the default "text" targets edits. Equation entries can
+        # also carry prevLatex (for retry reverts) and failReason (invalid-LaTeX
+        # rejections).
+        field = {"eq": "eqEdits", "append": "appendEdits"}.get(body.kind, "edits")
         for m in msgs:
             if isinstance(m, dict) and m.get("id") == mid and isinstance(m.get(field), list):
                 if 0 <= idx < len(m[field]):
                     m[field][idx]["state"] = body.state
-                    if body.kind == "eq":
-                        if body.prev_latex is not None:
-                            m[field][idx]["prevLatex"] = body.prev_latex
-                        if body.fail_reason is not None:
-                            m[field][idx]["failReason"] = body.fail_reason
+                    if body.kind == "eq" and body.prev_latex is not None:
+                        m[field][idx]["prevLatex"] = body.prev_latex
+                    if body.kind in ("eq", "append") and body.fail_reason is not None:
+                        m[field][idx]["failReason"] = body.fail_reason
                     applied = True
         if not applied:
             raise HTTPException(status_code=404, detail="edit not found")

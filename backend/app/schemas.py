@@ -84,8 +84,9 @@ class EditStatePatch(BaseModel):
     # Mirrors the frontend's ChatEditState union.
     state: Literal["pending", "applied", "rejected", "unlocatable", "stale", "reverted"]
     # "text" (default) targets message.edits[idx]; "eq" targets message.eqEdits[idx]
-    # (an equation patch entry, which can also carry prevLatex / failReason).
-    kind: Literal["text", "eq"] = "text"
+    # (an equation patch entry, which can also carry prevLatex / failReason);
+    # "append" targets message.appendEdits[idx].
+    kind: Literal["text", "eq", "append"] = "text"
     prev_latex: Optional[str] = None
     fail_reason: Optional[str] = None
 

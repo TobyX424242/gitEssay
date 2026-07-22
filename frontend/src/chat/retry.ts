@@ -61,6 +61,10 @@ export function buildRetryPlan(
     }
     const textCount = (m.edits ?? []).filter(e => e.state === 'applied').length;
     const eqCount = (m.eqEdits ?? []).filter(e => e.state === 'applied').length;
+    // Appends are deliberately NOT counted/reverted: appended trailing content
+    // doesn't overlay existing text, so it can't block a regenerated patch's
+    // SEARCH — and reverting it would mean deleting content the user may have
+    // since edited.
     const count = textCount + eqCount;
     if (count > 0) {
       const label = m.action?.kind === 'patch' ? m.action.explanation : undefined;

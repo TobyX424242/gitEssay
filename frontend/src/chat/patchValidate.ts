@@ -20,8 +20,15 @@
  */
 import type {LexicalEditor} from 'lexical';
 
-import {findEquationsByNonce, locateEdit, textContains, validateLatex} from './patch';
-import type {ChatEdit, ChatEqEdit, ChatMessage} from './types';
+import {
+  appendLatexFailures,
+  findEquationsByNonce,
+  locateEdit,
+  textContains,
+  validateAppendText,
+  validateLatex,
+} from './patch';
+import type {ChatAppendEdit, ChatEdit, ChatEqEdit, ChatMessage} from './types';
 
 export type PatchIssue = 'ok' | 'mis-copy' | 'stale' | 'invalid' | 'invalid-latex';
 
@@ -31,6 +38,9 @@ export interface LatexFailure {
   latex: string;
   error: string;
 }
+
+/** LatexFailure.nonce for a NEW equation inside an append edit (no token yet). */
+export const APPEND_LATEX_NONCE = 'append';
 
 export interface PatchClassification {
   issue: PatchIssue;
@@ -58,6 +68,7 @@ export function classifyPatch(
   edits: ChatEdit[],
   snapshot: string,
   eqEdits: ChatEqEdit[] = [],
+  appendEdits: ChatAppendEdit[] = [],
 ): PatchClassification {
   const paragraphs = snapshot.split(/\n\s*\n/);
   let anyMisCopy = false;
@@ -106,6 +117,19 @@ export function classifyPatch(
       latexFailures.push({nonce: e.nonce, latex: e.latex, error: v.error});
     }
   }
+  // Append edits: content is plain prose (+ optional NEW $$…$$ equations) —
+  // a sentinel token (or empty text) is structural; unparseable equation
+  // LaTeX is retryable, same as equation edits. APPEND_LATEX_NOUNCE marks a
+  // failure coming from an append (no [[EQ:nonce]] exists for a new equation).
+  for (const e of appendEdits) {
+    const v = validateAppendText(e.text);
+    if ('error' in v) {
+      return {issue: 'invalid', reason: v.error};
+    }
+    for (const f of appendLatexFailures(e.text)) {
+      latexFailures.push({nonce: APPEND_LATEX_NONCE, latex: f.latex, error: f.error});
+    }
+  }
   if (latexFailures.length > 0) {
     return {issue: 'invalid-latex', latexFailures};
   }
@@ -138,7 +162,9 @@ export function latexFeedback(failures: LatexFailure[]): string {
     .slice(0, 3)
     .map(
       f =>
-        `- [[EQ:${f.nonce}]]: ${f.error} (in "${f.latex.slice(0, 80)}")`,
+        f.nonce === APPEND_LATEX_NONCE
+          ? `- appended equation: ${f.error} (in "${f.latex.slice(0, 80)}")`
+          : `- [[EQ:${f.nonce}]]: ${f.error} (in "${f.latex.slice(0, 80)}")`,
     )
     .join('\n');
   return [

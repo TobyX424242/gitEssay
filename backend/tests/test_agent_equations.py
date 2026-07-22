@@ -53,15 +53,17 @@ def test_initial_message_omits_listing_without_equations():
 
 
 def test_split_edits_separates_text_and_equation_edits():
-    edits, eq_edits = _split_edits(
+    edits, eq_edits, appends = _split_edits(
         [
             {"search": "a", "replace": "b"},
             {"equation": "ab12cd34", "latex": "E=mc^2"},
+            {"append": "A brand-new ending."},
             {"search": "", "replace": ""},  # empty text edit still a text edit
         ]
     )
     assert edits == [{"search": "a", "replace": "b"}, {"search": "", "replace": ""}]
     assert eq_edits == [{"nonce": "ab12cd34", "latex": "E=mc^2"}]
+    assert appends == [{"text": "A brand-new ending."}]
 
 
 def test_set_eq_edit_state(client, project):
@@ -94,5 +96,37 @@ def test_set_eq_edit_state_404_without_eq_edits(client, project):
     r = client.patch(
         f"/api/conversations/{conv['id']}/messages/m1/edits/0",
         json={"state": "applied", "kind": "eq"},
+    )
+    assert r.status_code == 404
+
+
+def test_set_append_edit_state(client, project):
+    r = client.post(f"/api/projects/{project['id']}/conversations", json={"title": "t"})
+    assert r.status_code == 200
+    conv = r.json()
+    msg = {
+        "id": "m1",
+        "role": "assistant",
+        "text": "patch",
+        "appendEdits": [{"text": "new ending", "state": "pending"}],
+    }
+    r = client.post(f"/api/conversations/{conv['id']}/messages", json={"messages": [msg]})
+    assert r.status_code == 200, r.text
+    r = client.patch(
+        f"/api/conversations/{conv['id']}/messages/m1/edits/0",
+        json={"state": "applied", "kind": "append"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["messages"][0]["appendEdits"][0]["state"] == "applied"
+
+
+def test_set_append_edit_state_404_without_append_edits(client, project):
+    r = client.post(f"/api/projects/{project['id']}/conversations", json={"title": "t"})
+    conv = r.json()
+    msg = {"id": "m1", "role": "assistant", "text": "patch", "edits": []}
+    client.post(f"/api/conversations/{conv['id']}/messages", json={"messages": [msg]})
+    r = client.patch(
+        f"/api/conversations/{conv['id']}/messages/m1/edits/0",
+        json={"state": "applied", "kind": "append"},
     )
     assert r.status_code == 404

@@ -14,6 +14,7 @@
  * locating it is unambiguous; multi-block changes use multiple blocks.
  */
 import {
+  $createParagraphNode,
   $createTextNode,
   $getNodeByKey,
   $getRoot,
@@ -1027,4 +1028,141 @@ export async function applyEquationPatch(
     }
   });
   return {ok: true, prevLatex: target.equation};
+}
+
+// --- append patches ----------------------------------------------------------
+/**
+ * Append edits ({append: text}) are how the agent writes BRAND-NEW content:
+ * the text is appended to the END of the document as new paragraph(s), split
+ * on blank lines. Appended content must be plain prose — a sentinel token in
+ * it would clone/invent an atomic node, so it is refused up front.
+ *
+ * The agent MAY include new DISPLAY equations in the appended content, written
+ * as LaTeX between `$$` lines (same shape as the markdown block-equation
+ * transformer). Each becomes a real EquationNode (display, LaTeX); every block
+ * is KaTeX-validated before anything is inserted.
+ */
+
+/** One piece of appended content: prose (→ paragraphs) or a new equation. */
+export type AppendSegment =
+  | {kind: 'text'; text: string}
+  | {kind: 'equation'; latex: string};
+
+/**
+ * Split append text into prose and `$$…$$` equation segments. A `$$` fence is
+ * a line whose trimmed content is exactly `$$` (mirrors BLOCK_EQUATION's
+ * regExpStart/End). An unterminated fence degrades to literal prose.
+ */
+export function splitAppendSegments(text: string): AppendSegment[] {
+  const segs: AppendSegment[] = [];
+  const lines = text.split('\n');
+  let buf: string[] = [];
+  let inEq = false;
+  const flushText = () => {
+    const t = buf.join('\n').trim();
+    if (t) {
+      segs.push({kind: 'text', text: t});
+    }
+    buf = [];
+  };
+  for (const line of lines) {
+    if (line.trim() === '$$') {
+      if (inEq) {
+        segs.push({kind: 'equation', latex: buf.join('\n').trim()});
+        buf = [];
+        inEq = false;
+      } else {
+        flushText();
+        inEq = true;
+      }
+    } else {
+      buf.push(line);
+    }
+  }
+  if (inEq) {
+    // Unterminated fence — keep it as literal prose (never drop user content).
+    segs.push({kind: 'text', text: ('$$\n' + buf.join('\n')).trim()});
+  } else {
+    flushText();
+  }
+  return segs;
+}
+
+export type AppendPatchResult =
+  | {ok: true; paragraphs: number}
+  | {ok: false; kind: 'empty' | 'sentinel' | 'invalid-latex'; reason: string};
+
+/** Validate append content (shared by classifyPatch and applyAppendPatch). */
+export function validateAppendText(
+  text: string,
+): {ok: true} | {ok: false; error: string} {
+  if (!text.trim()) {
+    return {ok: false, error: 'empty append text'};
+  }
+  if (SENTINEL_RE.test(text)) {
+    return {
+      ok: false,
+      error:
+        'appended content must not contain [[CITE:…]]/[[EQ:…]] tokens — new content is plain prose',
+    };
+  }
+  return {ok: true};
+}
+
+/** The KaTeX errors of every `$$…$$` equation in the append text ([] = all ok). */
+export function appendLatexFailures(
+  text: string,
+): Array<{latex: string; error: string}> {
+  const out: Array<{latex: string; error: string}> = [];
+  for (const seg of splitAppendSegments(text)) {
+    if (seg.kind === 'equation') {
+      const v = validateLatex(seg.latex);
+      if ('error' in v) {
+        out.push({latex: seg.latex, error: v.error});
+      }
+    }
+  }
+  return out;
+}
+
+/** Append `text` to the end of the document: prose → paragraphs, `$$…$$`
+ *  blocks → display EquationNodes. LaTeX is re-validated here (defense in
+ *  depth): one bad block refuses the whole append without touching the doc. */
+export async function applyAppendPatch(
+  editor: LexicalEditor,
+  text: string,
+): Promise<AppendPatchResult> {
+  const v = validateAppendText(text);
+  if ('error' in v) {
+    return {
+      ok: false,
+      kind: v.error.startsWith('empty') ? 'empty' : 'sentinel',
+      reason: v.error,
+    };
+  }
+  const bad = appendLatexFailures(text);
+  if (bad.length > 0) {
+    return {ok: false, kind: 'invalid-latex', reason: bad[0].error};
+  }
+  const segs = splitAppendSegments(text);
+  let paragraphs = 0;
+  // Await so callers (checkpoint capture, retry) see the COMMITTED state.
+  await editor.update(() => {
+    const root = $getRoot();
+    for (const seg of segs) {
+      if (seg.kind === 'equation') {
+        root.append($createEquationNode(seg.latex, false, true));
+        paragraphs++;
+        continue;
+      }
+      for (const chunk of seg.text
+        .split(/\n\s*\n/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0)) {
+        root.append($createParagraphNode().append($createTextNode(chunk)));
+        paragraphs++;
+      }
+    }
+  });
+  return {ok: true, paragraphs};
 }

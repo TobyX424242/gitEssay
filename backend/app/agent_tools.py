@@ -124,6 +124,13 @@ def propose_patch(explanation: str, edits: list[dict]) -> str:
       ONLY to change an equation's content; `latex` is the COMPLETE new LaTeX and
       MUST parse under KaTeX (check braces, \\commands, environments). Never put
       LaTeX source into a text edit's search/replace.
+    - APPEND edit: {"append": str} — appends the text to the END of the document
+      as new paragraph(s) (separate paragraphs with blank lines). Use this to ADD
+      brand-new content (a new section, conclusion, paragraph). The appended text
+      is plain prose: it must NOT contain [[CITE:…]] or [[EQ:…]] tokens. It MAY
+      contain NEW display equations: put the LaTeX between lines containing only
+      $$ (a $$ fence line before and after the LaTeX); each becomes a real
+      equation block and MUST parse under KaTeX.
     You may emit several edits in one call. Citations and equations appear in the
     document as OPAQUE TOKENS like [[CITE:1a2b3c4d]] and [[EQ:9e8f7a6b]] — treat
     each token as a single indivisible unit: copy it VERBATIM into search and

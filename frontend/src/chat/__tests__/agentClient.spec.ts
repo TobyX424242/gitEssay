@@ -168,6 +168,26 @@ describe('runAgentGraph (LangGraph engine)', () => {
     expect(msg.eqEdits).toEqual([{nonce: 'ab12cd34', latex: 'E=mc^{2}', state: 'pending'}]);
   });
 
+  it('parses appends from a patch event', async () => {
+    const editor = await makeEditor(['Body.']);
+    stubFetch([
+      {
+        type: 'patch',
+        explanation: 'Add a conclusion',
+        edits: [],
+        appends: [{text: 'In conclusion, the method holds.'}, {text: '  '}],
+      },
+      {type: 'done'},
+    ]);
+
+    const msg = await runAgentGraph(baseOpts(editor) as any);
+
+    expect(msg.action).toEqual({kind: 'patch', explanation: 'Add a conclusion'});
+    expect(msg.appendEdits).toEqual([
+      {text: 'In conclusion, the method holds.', state: 'pending'},
+    ]);
+  });
+
   it('an all-no-op patch downgrades to an advice turn (no empty card)', async () => {
     const editor = await makeEditor(['Hello.']);
     stubFetch([

@@ -143,6 +143,22 @@ export async function setEqEditState(
   emit();
 }
 
+/** Same as setEditState but for a message's `appendEdits` entry. */
+export async function setAppendEditState(
+  convId: string,
+  msgId: string,
+  editIdx: number,
+  state: ChatEditState,
+  extra?: {failReason?: string},
+): Promise<void> {
+  await api.patch(`/conversations/${convId}/messages/${msgId}/edits/${editIdx}`, {
+    state,
+    kind: 'append',
+    fail_reason: extra?.failReason ?? null,
+  });
+  emit();
+}
+
 export async function deleteConversation(id: string): Promise<void> {
   await api.del(`/conversations/${id}`);
   void loadProjects();

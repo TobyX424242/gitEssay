@@ -105,19 +105,23 @@ def _history_to_messages(history: list) -> list:
     return msgs
 
 
-def _split_edits(raw_edits) -> tuple[list[dict], list[dict]]:
-    """Split propose_patch edits into TEXT edits ({search, replace}) and
-    EQUATION edits ({equation: nonce, latex} → {nonce, latex}). An edit is one
-    or the other — the presence of a non-empty `equation` key decides."""
+def _split_edits(raw_edits) -> tuple[list[dict], list[dict], list[dict]]:
+    """Split propose_patch edits into TEXT edits ({search, replace}), EQUATION
+    edits ({equation: nonce, latex} → {nonce, latex}) and APPEND edits
+    ({append: text} → {text}). An edit is exactly one of the three — decided
+    by the first non-empty discriminator key."""
     edits: list[dict] = []
     eq_edits: list[dict] = []
+    appends: list[dict] = []
     for e in raw_edits or []:
         get = e.get if isinstance(e, dict) else lambda k, d="": getattr(e, k, d)
         if get("equation"):
             eq_edits.append({"nonce": get("equation"), "latex": get("latex")})
+        elif get("append"):
+            appends.append({"text": get("append")})
         else:
             edits.append({"search": get("search"), "replace": get("replace")})
-    return edits, eq_edits
+    return edits, eq_edits, appends
 
 
 def _equation_listing(equations) -> list[str]:
@@ -554,8 +558,8 @@ def build_graph(ctx: RunContext):
 
             elif name == "propose_patch":
                 explanation = args.get("explanation") or ""
-                edits, eq_edits = _split_edits(args.get("edits"))
-                terminal = {"kind": "patch", "explanation": explanation, "edits": edits, "eq_edits": eq_edits}
+                edits, eq_edits, appends = _split_edits(args.get("edits"))
+                terminal = {"kind": "patch", "explanation": explanation, "edits": edits, "eq_edits": eq_edits, "appends": appends}
                 new_messages.append(ToolMessage(content="Patch proposed. The user will review it. Stop now.", tool_call_id=tcid))
 
             elif name == "ask_user":
@@ -667,6 +671,7 @@ async def run_agent_stream(req, s, db):
                             "explanation": term.get("explanation", ""),
                             "edits": term.get("edits", []),
                             "eq_edits": term.get("eq_edits", []),
+                            "appends": term.get("appends", []),
                         }
                     elif term.get("kind") == "ask":
                         yield {

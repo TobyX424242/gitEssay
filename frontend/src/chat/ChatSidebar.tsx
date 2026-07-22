@@ -35,12 +35,14 @@ import {
   deleteConversation,
   replaceMessage,
   setActiveConversation,
+  setAppendEditState,
   setEditState,
   setEqEditState,
   useConversations,
 } from './conversations';
 import Markdown from './Markdown';
 import {
+  applyAppendPatch,
   applyEquationPatch,
   applyTextPatch,
   findEquationsByNonce,
@@ -48,6 +50,7 @@ import {
   textContains,
 } from './patch';
 import {
+  APPEND_LATEX_NONCE,
   classifyPatch,
   latexFeedback,
   MAX_PATCH_ATTEMPTS,
@@ -410,9 +413,17 @@ export default function ChatSidebar(): JSX.Element {
           );
         }
         const hasPatchEdits =
-          (msg.edits?.length ?? 0) > 0 || (msg.eqEdits?.length ?? 0) > 0;
+          (msg.edits?.length ?? 0) > 0 ||
+          (msg.eqEdits?.length ?? 0) > 0 ||
+          (msg.appendEdits?.length ?? 0) > 0;
         if (msg.action?.kind === 'patch' && hasPatchEdits) {
-          const cls = classifyPatch(editor, msg.edits ?? [], snapshot, msg.eqEdits ?? []);
+          const cls = classifyPatch(
+            editor,
+            msg.edits ?? [],
+            snapshot,
+            msg.eqEdits ?? [],
+            msg.appendEdits ?? [],
+          );
           const {issue, reason} = cls;
           if (issue === 'stale') {
             // The passage the AI was editing is gone from the live doc — the doc
@@ -435,7 +446,14 @@ export default function ChatSidebar(): JSX.Element {
                 const f = failures.find(x => x.nonce === e.nonce);
                 return f ? {...e, state: 'rejected' as const, failReason: f.error} : e;
               });
-              return Promise.resolve({...msg, eqEdits, snapshot});
+              // Append edits fail when one of their NEW $$…$$ equations is bad.
+              const appendEdits = (msg.appendEdits ?? []).map(e => {
+                const f = failures.find(
+                  x => x.nonce === APPEND_LATEX_NONCE && e.text.includes(x.latex),
+                );
+                return f ? {...e, state: 'rejected' as const, failReason: f.error} : e;
+              });
+              return Promise.resolve({...msg, eqEdits, appendEdits, snapshot});
             }
             const failedText =
               msg.text?.trim() || '(proposed a patch with invalid LaTeX)';
@@ -763,6 +781,7 @@ export default function ChatSidebar(): JSX.Element {
         const label = msg.action.explanation;
         const edits = msg.edits ?? [];
         const eqEdits = msg.eqEdits ?? [];
+        const appendEdits = msg.appendEdits ?? [];
         let appliedAny = false;
         let staleCount = 0;
         const snapshot = msg.snapshot ?? '';
@@ -811,6 +830,26 @@ export default function ChatSidebar(): JSX.Element {
             });
           } else {
             await setEqEditState(
+              convId,
+              msgId_,
+              i,
+              res.kind === 'invalid-latex' ? 'rejected' : 'unlocatable',
+              {failReason: res.reason},
+            );
+          }
+        }
+        // Append edits last, so the new content lands at the very end of the
+        // document even when the same patch also edited existing text.
+        for (let i = 0; i < appendEdits.length; i++) {
+          if (appendEdits[i].state !== 'pending') {
+            continue;
+          }
+          const res = await applyAppendPatch(editor, appendEdits[i].text);
+          if ('paragraphs' in res) {
+            appliedAny = true;
+            await setAppendEditState(convId, msgId_, i, 'applied');
+          } else {
+            await setAppendEditState(
               convId,
               msgId_,
               i,
@@ -878,6 +917,29 @@ export default function ChatSidebar(): JSX.Element {
         return;
       }
       void setEqEditState(convId, msgId_, editIdx, 'pending');
+    },
+    [active],
+  );
+
+  /** Append-edit counterparts of rejectEdit / restoreEdit. */
+  const rejectAppendEdit = useCallback(
+    (msgId_: string, editIdx: number) => {
+      const convId = active?.id;
+      if (!convId) {
+        return;
+      }
+      void setAppendEditState(convId, msgId_, editIdx, 'rejected');
+    },
+    [active],
+  );
+
+  const restoreAppendEdit = useCallback(
+    (msgId_: string, editIdx: number) => {
+      const convId = active?.id;
+      if (!convId) {
+        return;
+      }
+      void setAppendEditState(convId, msgId_, editIdx, 'pending');
     },
     [active],
   );
@@ -1162,6 +1224,8 @@ export default function ChatSidebar(): JSX.Element {
                 onRestoreEdit={i => restoreEdit(m.id, i)}
                 onRejectEqEdit={i => rejectEqEdit(m.id, i)}
                 onRestoreEqEdit={i => restoreEqEdit(m.id, i)}
+                onRejectAppendEdit={i => rejectAppendEdit(m.id, i)}
+                onRestoreAppendEdit={i => restoreAppendEdit(m.id, i)}
                 resolveEquation={nonce =>
                   findEquationsByNonce(editor, nonce)[0]?.equation
                 }
@@ -1185,6 +1249,8 @@ export default function ChatSidebar(): JSX.Element {
               onRestoreEdit={i => restoreEdit(streaming.id, i)}
               onRejectEqEdit={i => rejectEqEdit(streaming.id, i)}
               onRestoreEqEdit={i => restoreEqEdit(streaming.id, i)}
+              onRejectAppendEdit={i => rejectAppendEdit(streaming.id, i)}
+              onRestoreAppendEdit={i => restoreAppendEdit(streaming.id, i)}
               resolveEquation={nonce =>
                 findEquationsByNonce(editor, nonce)[0]?.equation
               }
@@ -1267,6 +1333,8 @@ function MessageBubble({
   onRestoreEdit,
   onRejectEqEdit,
   onRestoreEqEdit,
+  onRejectAppendEdit,
+  onRestoreAppendEdit,
   resolveEquation,
   onAcceptEditLegacy,
   onRetry,
@@ -1284,6 +1352,9 @@ function MessageBubble({
   /** Equation-edit counterparts of onRejectEdit / onRestoreEdit. */
   onRejectEqEdit: (editIdx: number) => void;
   onRestoreEqEdit: (editIdx: number) => void;
+  /** Append-edit counterparts of onRejectEdit / onRestoreEdit. */
+  onRejectAppendEdit: (editIdx: number) => void;
+  onRestoreAppendEdit: (editIdx: number) => void;
   /** Resolve an [[EQ:nonce]] token to the equation's CURRENT LaTeX (diff old side). */
   resolveEquation: (nonce: string) => string | undefined;
   /** Legacy per-edit accept (messages with `edits` but no `action`). */
@@ -1309,6 +1380,14 @@ function MessageBubble({
         ),
       ),
     [message.eqEdits, resolveEquation],
+  );
+  // Append edits: all-added diff (empty → appended text).
+  const appendOps = useMemo(
+    () =>
+      (message.appendEdits ?? []).map(e =>
+        diffBlocks(plainTextToBlocks(''), plainTextToBlocks(e.text)),
+      ),
+    [message.appendEdits],
   );
 
   const [eqModal, showEqModal] = useModal();
@@ -1363,33 +1442,26 @@ function MessageBubble({
   const showThinking = hasThinking;
   const edits = message.edits ?? [];
   const eqEdits = message.eqEdits ?? [];
+  const appendEdits = message.appendEdits ?? [];
   const isAtomicPatch = message.action?.kind === 'patch';
   const patchLabel =
     message.action?.kind === 'patch' ? message.action.explanation : undefined;
   const hasPendingEdit =
     edits.some(e => e.state === 'pending') ||
-    eqEdits.some(e => e.state === 'pending');
+    eqEdits.some(e => e.state === 'pending') ||
+    appendEdits.some(e => e.state === 'pending');
   const pendingEditCount =
     edits.filter(e => e.state === 'pending').length +
-    eqEdits.filter(e => e.state === 'pending').length;
+    eqEdits.filter(e => e.state === 'pending').length +
+    appendEdits.filter(e => e.state === 'pending').length;
   // The patch is sealed once the action-level Accept has run (any edit applied or
   // unlocatable) or it was reverted for retry — before that, a rejected edit can
   // still be restored to pending.
+  const sealedStates = ['applied', 'unlocatable', 'stale', 'reverted'];
   const actionSealed =
-    edits.some(
-      e =>
-        e.state === 'applied' ||
-        e.state === 'unlocatable' ||
-        e.state === 'stale' ||
-        e.state === 'reverted',
-    ) ||
-    eqEdits.some(
-      e =>
-        e.state === 'applied' ||
-        e.state === 'unlocatable' ||
-        e.state === 'stale' ||
-        e.state === 'reverted',
-    );
+    edits.some(e => sealedStates.includes(e.state)) ||
+    eqEdits.some(e => sealedStates.includes(e.state)) ||
+    appendEdits.some(e => sealedStates.includes(e.state));
 
   if (message.role === 'user') {
     return (
@@ -1474,9 +1546,10 @@ function MessageBubble({
         </div>
       ) : (
         <>
-          {patchLabel && (edits.length > 0 || eqEdits.length > 0) && (
-            <div className="chat-edit-explanation">✎ {patchLabel}</div>
-          )}
+          {patchLabel &&
+            (edits.length > 0 || eqEdits.length > 0 || appendEdits.length > 0) && (
+              <div className="chat-edit-explanation">✎ {patchLabel}</div>
+            )}
           {edits.map((e, i) => (
             <div key={i} className="chat-edit">
               <div className="chat-edit-label">
@@ -1597,6 +1670,52 @@ function MessageBubble({
                 {(e.state === 'unlocatable' || e.state === 'stale') && (
                   <span className="chat-edit-status chat-edit-status--err">
                     ⚠ Couldn’t locate this equation (it may have changed)
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {/* Append edits: new content added to the end of the document. */}
+          {appendEdits.map((e, i) => (
+            <div key={`append-${i}`} className="chat-edit">
+              <div className="chat-edit-label">Append to end of document</div>
+              <div className="chat-edit-diff">
+                <DiffView ops={appendOps[i]} />
+              </div>
+              <div className="chat-edit-actions">
+                {e.state === 'pending' && isAtomicPatch && (
+                  <button
+                    type="button"
+                    className="cp-button cp-button--ghost"
+                    onClick={() => onRejectAppendEdit(i)}>
+                    Reject
+                  </button>
+                )}
+                {e.state === 'applied' && (
+                  <span className="chat-edit-status chat-edit-status--ok">✓ Applied</span>
+                )}
+                {e.state === 'reverted' && (
+                  <span className="chat-edit-status">↩ Reverted</span>
+                )}
+                {e.state === 'rejected' &&
+                  (e.failReason ? (
+                    <span className="chat-edit-status chat-edit-status--err">
+                      ⚠ Invalid LaTeX — rejected: {e.failReason}
+                    </span>
+                  ) : actionSealed ? (
+                    <span className="chat-edit-status">Rejected</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="cp-button cp-button--ghost chat-edit-undo"
+                      onClick={() => onRestoreAppendEdit(i)}>
+                      ↩ Undo reject
+                    </button>
+                  ))}
+                {(e.state === 'unlocatable' || e.state === 'stale') && (
+                  <span className="chat-edit-status chat-edit-status--err">
+                    ⚠ Couldn’t append this content
                   </span>
                 )}
               </div>

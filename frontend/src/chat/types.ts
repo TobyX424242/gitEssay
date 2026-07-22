@@ -38,6 +38,16 @@ export interface ChatEqEdit {
   latex: string;
 }
 
+/**
+ * An append edit — the ONLY way a patch may add brand-new content: the text is
+ * appended to the END of the document as new paragraph(s) (blank-line separated).
+ * Append content is plain prose: it must NOT contain [[CITE:…]]/[[EQ:…]]
+ * sentinels (the AI cannot invent or clone atomic nodes).
+ */
+export interface ChatAppendEdit {
+  text: string;
+}
+
 /** Lifecycle of a proposed edit in the UI. */
 export type ChatEditState =
   | 'pending'
@@ -126,6 +136,11 @@ export interface ChatMessage {
   eqEdits?: Array<
     ChatEqEdit & {state: ChatEditState; prevLatex?: string; failReason?: string}
   >;
+  /** Assistant only: proposed content appends (new paragraphs at the end of
+   *  the document; may contain NEW display equations as $$…$$ blocks).
+   *  Appends are never auto-reverted by Retry (they don't overlay existing
+   *  text, so they can't block a regenerated patch). */
+  appendEdits?: Array<ChatAppendEdit & {state: ChatEditState; failReason?: string}>;
   /** Assistant only: error message if the call failed. */
   error?: string;
   /** Assistant only: true while this turn is still streaming (UI hint). */

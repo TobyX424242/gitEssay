@@ -105,7 +105,10 @@ export function messagesToHistory(messages: ChatMessage[]): ChatTurn[] {
     }
     const a = m.action;
     if (a?.kind === 'patch') {
-      const n = (m.edits ?? []).length + (m.eqEdits ?? []).length;
+      const n =
+        (m.edits ?? []).length +
+        (m.eqEdits ?? []).length +
+        (m.appendEdits ?? []).length;
       parts.push(`[Proposed ${n} edit(s): "${a.explanation}"]`);
     } else if (a?.kind === 'ask') {
       parts.push(`[Asked the user: "${a.question}"]`);
@@ -126,6 +129,7 @@ interface AgentEvent {
   explanation?: string;
   edits?: {search: string; replace: string}[];
   eq_edits?: {nonce: string; latex: string}[];
+  appends?: {text: string}[];
   question?: string;
   options?: string[];
   message?: string;
@@ -156,6 +160,15 @@ function noOpEqEdits(
     .map(e => ({...e, state: 'pending' as ChatEditState}));
 }
 
+/** Drop append edits with empty text (nothing to append). */
+function noOpAppendEdits(
+  edits: {text: string}[],
+): NonNullable<ChatMessage['appendEdits']> {
+  return edits
+    .filter(e => typeof e.text === 'string' && e.text.trim().length > 0)
+    .map(e => ({...e, state: 'pending' as ChatEditState}));
+}
+
 /**
  * Run the backend LangGraph agent to completion (or abort). Returns the finalized
  * assistant message. Throws on fatal non-abort errors (caller surfaces them).
@@ -179,6 +192,7 @@ export async function runAgentGraph(opts: AgentGraphOpts): Promise<ChatMessage> 
   let action: AssistantAction | null = null;
   let edits: ChatMessage['edits'];
   let eqEdits: ChatMessage['eqEdits'];
+  let appendEdits: ChatMessage['appendEdits'];
   let errorMessage: string | undefined;
 
   const res = await fetch('/api/agent/run', {
@@ -242,11 +256,17 @@ export async function runAgentGraph(opts: AgentGraphOpts): Promise<ChatMessage> 
         } else if (ev.type === 'patch') {
           const cleaned = noOpEdits(ev.edits ?? []);
           const cleanedEq = noOpEqEdits(ev.eq_edits ?? []);
-          if (cleaned.length === 0 && cleanedEq.length === 0) {
+          const cleanedAppends = noOpAppendEdits(ev.appends ?? []);
+          if (
+            cleaned.length === 0 &&
+            cleanedEq.length === 0 &&
+            cleanedAppends.length === 0
+          ) {
             // All-no-op patch → downgrade to an advice turn (no empty card).
             action = null;
             edits = undefined;
             eqEdits = undefined;
+            appendEdits = undefined;
             if (!text.trim()) {
               text = 'No changes to apply.';
               opts.onUpdate({text});
@@ -255,8 +275,9 @@ export async function runAgentGraph(opts: AgentGraphOpts): Promise<ChatMessage> 
             action = {kind: 'patch', explanation: ev.explanation ?? ''};
             edits = cleaned;
             eqEdits = cleanedEq;
+            appendEdits = cleanedAppends;
           }
-          opts.onUpdate({action: action ?? undefined, edits, eqEdits});
+          opts.onUpdate({action: action ?? undefined, edits, eqEdits, appendEdits});
         } else if (ev.type === 'ask') {
           action = {
             kind: 'ask',
@@ -275,12 +296,12 @@ export async function runAgentGraph(opts: AgentGraphOpts): Promise<ChatMessage> 
   } catch (err) {
     await reader.cancel().catch(() => {});
     if (isAbort(err)) {
-      return finalize(opts, text, thinking, steps, action, edits, eqEdits, undefined);
+      return finalize(opts, text, thinking, steps, action, edits, eqEdits, appendEdits, undefined);
     }
     throw err; // network drop / unexpected — let the caller surface it
   }
 
-  return finalize(opts, text, thinking, steps, action, edits, eqEdits, errorMessage);
+  return finalize(opts, text, thinking, steps, action, edits, eqEdits, appendEdits, errorMessage);
 }
 
 function finalize(
@@ -291,6 +312,7 @@ function finalize(
   action: AssistantAction | null,
   edits: ChatMessage['edits'],
   eqEdits: ChatMessage['eqEdits'],
+  appendEdits: ChatMessage['appendEdits'],
   error: string | undefined,
 ): ChatMessage {
   const msg: ChatMessage = {
@@ -303,6 +325,7 @@ function finalize(
     action,
     edits,
     eqEdits,
+    appendEdits,
     streaming: false,
   };
   if (error) {
