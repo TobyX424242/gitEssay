@@ -11,17 +11,20 @@ import {
 } from 'lexical';
 
 import {textContains} from '../patch';
+import {$createEquationNode, EquationNode} from '../../nodes/EquationNode';
 import {
   classifyPatch,
+  latexFeedback,
   MAX_PATCH_ATTEMPTS,
   patchFeedback,
   withPatchFailure,
 } from '../patchValidate';
+import {equationContentNonce} from '../sentinels';
 import type {ChatEdit, ChatMessage} from '../types';
 
 function makeEditor(): LexicalEditor {
   return createEditor({
-    nodes: [ParagraphNode, TextNode],
+    nodes: [ParagraphNode, TextNode, EquationNode],
     onError(err) {
       throw err;
     },
@@ -126,6 +129,66 @@ describe('classifyPatch', () => {
         'Hello world.',
       ).issue,
     ).toBe('invalid');
+  });
+});
+
+describe('classifyPatch — equation edits', () => {
+  async function setEqDoc(editor: LexicalEditor, latex = 'x^2'): Promise<string> {
+    await editor.update(() => {
+      const root = $getRoot();
+      root.clear();
+      root.append($createParagraphNode().append($createEquationNode(latex, true, true)));
+    });
+    return equationContentNonce(true, latex, true);
+  }
+
+  it('ok when every equation edit targets a live equation with parseable LaTeX', async () => {
+    const editor = makeEditor();
+    const nonce = await setEqDoc(editor);
+    const cls = classifyPatch(editor, [], '', [{nonce, latex: '\\frac{a}{b}'}]);
+    expect(cls.issue).toBe('ok');
+  });
+
+  it('unparseable LaTeX → invalid-latex (retryable) with per-edit failures', async () => {
+    const editor = makeEditor();
+    const nonce = await setEqDoc(editor);
+    const cls = classifyPatch(editor, [], '', [{nonce, latex: '\\frac{a}{'}]);
+    expect(cls.issue).toBe('invalid-latex');
+    expect(cls.latexFailures).toHaveLength(1);
+    expect(cls.latexFailures![0].nonce).toBe(nonce);
+    expect(cls.latexFailures![0].error.length).toBeGreaterThan(0);
+  });
+
+  it('an unknown equation token → invalid (structural, not retryable)', async () => {
+    const editor = makeEditor();
+    await setEqDoc(editor);
+    const cls = classifyPatch(editor, [], '', [{nonce: 'deadbeef', latex: 'y'}]);
+    expect(cls.issue).toBe('invalid');
+    expect(cls.reason).toContain('equation');
+  });
+
+  it('stale still vetoes over an invalid-latex equation edit', async () => {
+    const editor = makeEditor();
+    const nonce = await setEqDoc(editor);
+    // Text search was in the snapshot but is gone from the live doc → stale wins.
+    const cls = classifyPatch(
+      editor,
+      [edit('Gone passage.')],
+      'Gone passage.',
+      [{nonce, latex: '\\frac{a}{'}],
+    );
+    expect(cls.issue).toBe('stale');
+  });
+});
+
+describe('latexFeedback', () => {
+  it('names the failing token, the KaTeX error, and asks for a fix', () => {
+    const f = latexFeedback([
+      {nonce: 'ab12cd34', latex: '\\frac{a}{', error: 'ParseError: Expected group'},
+    ]);
+    expect(f).toContain('[[EQ:ab12cd34]]');
+    expect(f).toContain('ParseError: Expected group');
+    expect(f).toContain('KaTeX');
   });
 });
 

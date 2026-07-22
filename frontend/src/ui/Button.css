@@ -7,19 +7,33 @@
  *
  */
 
+/* Unified dialog button — themed via --ge-* tokens (light + dark). Use the
+   `primary` variant for the confirming action, the default for dismissive
+   actions (mirrors `cp-button` / `cp-button--ghost` in the panels). */
+
 .Button__root {
-  padding-top: 10px;
-  padding-bottom: 10px;
-  padding-left: 15px;
-  padding-right: 15px;
-  border: 0px;
-  background-color: #eee;
-  border-radius: 5px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 14px;
+  padding-right: 14px;
+  border: 1px solid var(--ge-border);
+  background-color: var(--ge-surface-2);
+  color: var(--ge-text);
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
 }
 .Button__root:hover {
-  background-color: #ddd;
+  background-color: var(--ge-border);
+}
+.Button__primary {
+  background-color: var(--ge-accent);
+  border-color: transparent;
+  color: #fff;
+}
+.Button__primary:hover {
+  background-color: var(--ge-accent);
+  filter: brightness(1.08);
 }
 .Button__small {
   padding-top: 5px;
@@ -30,7 +44,12 @@
 }
 .Button__disabled {
   cursor: not-allowed;
+  opacity: 0.5;
 }
 .Button__disabled:hover {
-  background-color: #eee;
+  background-color: var(--ge-surface-2);
+  filter: none;
+}
+.Button__primary.Button__disabled:hover {
+  background-color: var(--ge-accent);
 }

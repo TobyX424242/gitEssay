@@ -16,6 +16,7 @@ from langgraph.graph.message import add_messages
 class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
     doc_paragraphs: list[str]
+    doc_equations: list[dict]  # [{nonce, inline, latex}] — LaTeX behind each [[EQ:nonce]]
     steps: Annotated[list[dict], operator.add]
-    terminal: Optional[dict]  # {'kind':'patch','explanation','edits'} | {'kind':'ask','question','options'}
+    terminal: Optional[dict]  # {'kind':'patch','explanation','edits','eq_edits'} | {'kind':'ask','question','options'}
     read_hits: dict  # {normalized_query_or_'': hits} — de-dup cache

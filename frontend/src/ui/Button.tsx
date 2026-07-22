@@ -22,6 +22,7 @@ export default function Button({
   onClick,
   disabled,
   small,
+  primary,
   title,
 }: {
   'data-test-id'?: string;
@@ -30,6 +31,7 @@ export default function Button({
   disabled?: boolean;
   onClick: () => void;
   small?: boolean;
+  primary?: boolean;
   title?: string;
 }): JSX.Element {
   return (
@@ -39,6 +41,7 @@ export default function Button({
         'Button__root',
         disabled && 'Button__disabled',
         small && 'Button__small',
+        primary && 'Button__primary',
         className,
       )}
       onClick={onClick}

@@ -27,7 +27,7 @@
 
 .KatexEquationAlterer_centerRow {
   display: flex;
-  flex-direction: 'row';
+  flex-direction: row;
   margin-top: 10px;
   margin-bottom: 10px;
   justify-content: center;
@@ -37,5 +37,51 @@
 .KatexEquationAlterer_textArea {
   width: 100%;
   resize: none;
-  padding: 7px;
+  padding: 7px 10px;
+  border: 1px solid var(--ge-border);
+  border-radius: 6px;
+  background: var(--ge-surface);
+  color: var(--ge-text);
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.KatexEquationAlterer_textArea:focus {
+  outline: 2px solid var(--ge-accent);
+  outline-offset: -1px;
+}
+
+/* Slider switch for the LaTeX toggle (track/thumb styles come from the shared
+   .mem-switch in chat.css). */
+.KatexEquationAlterer_switch {
+  margin-top: 0;
+}
+
+/* Preview: a real block box (never a shrinking flex item) — KaTeX display
+   output uses absolutely-positioned internals, and inside a flex row the span
+   could shrink below its content width and the glyphs piled onto each other. */
+.KatexEquationAlterer_preview {
+  display: block;
+  width: 100%;
+  max-height: 40vh;
+  overflow: auto;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--ge-border);
+  border-radius: 6px;
+  background: var(--ge-surface);
+  text-align: center;
+  box-sizing: border-box;
+  /* Independent KaTeX equation numbering (katexEqnNo is page-global). */
+  counter-reset: katexEqnNo 0;
+}
+
+.KatexEquationAlterer_plainPreview {
+  border-style: dashed;
+  color: var(--ge-text);
+  font-size: 14px;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
 }

@@ -40,12 +40,14 @@ import {$isEquationNode} from './EquationNode';
 type EquationComponentProps = {
   equation: string;
   inline: boolean;
+  latex: boolean;
   nodeKey: NodeKey;
 };
 
 export default function EquationComponent({
   equation,
   inline,
+  latex,
   nodeKey,
 }: EquationComponentProps): JSX.Element {
   const [editor] = useLexicalComposerContext();
@@ -284,7 +286,7 @@ export default function EquationComponent({
           onDeleteEmpty={onDeleteEmpty}
           ref={inputRef}
         />
-      ) : (
+      ) : latex ? (
         <LexicalErrorBoundary onError={e => editor._onError(e)} fallback={null}>
           <KatexRenderer
             equation={equationValue}
@@ -296,6 +298,18 @@ export default function EquationComponent({
             }}
           />
         </LexicalErrorBoundary>
+      ) : (
+        // Non-LaTeX equation: show the raw source as plain text (no KaTeX).
+        // Double-click enters the same EquationEditor as LaTeX equations.
+        <span
+          className="editor-equation-plain-text"
+          onDoubleClick={() => {
+            if (isEditable) {
+              setShowEquationEditor(true);
+            }
+          }}>
+          {equationValue}
+        </span>
       )}
     </>
   );

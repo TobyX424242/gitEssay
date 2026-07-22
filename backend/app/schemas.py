@@ -83,6 +83,11 @@ class MessageReplace(BaseModel):
 class EditStatePatch(BaseModel):
     # Mirrors the frontend's ChatEditState union.
     state: Literal["pending", "applied", "rejected", "unlocatable", "stale", "reverted"]
+    # "text" (default) targets message.edits[idx]; "eq" targets message.eqEdits[idx]
+    # (an equation patch entry, which can also carry prevLatex / failReason).
+    kind: Literal["text", "eq"] = "text"
+    prev_latex: Optional[str] = None
+    fail_reason: Optional[str] = None
 
 
 # ---- memories (AI long-term, project/literature-scoped notes) -------------
@@ -194,5 +199,8 @@ class AgentRunRequest(BaseModel):
     mode: Literal["selection", "document"] = "document"
     selection_text: str = ""
     doc_paragraphs: list[str]
+    # The document's LaTeX equations: [{nonce, inline, latex}] — each [[EQ:nonce]]
+    # token in doc_paragraphs maps to one entry carrying its raw LaTeX source.
+    doc_equations: list[dict[str, Any]] = []
     history: list[dict[str, Any]] = []  # [{role: 'user'|'assistant', content: str}]
     memory_enabled: bool = False

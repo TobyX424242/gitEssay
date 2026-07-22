@@ -34,6 +34,7 @@ import KatexEquationAlterer from '../../ui/KatexEquationAlterer';
 type CommandPayload = {
   equation: string;
   inline: boolean;
+  latex: boolean;
 };
 
 export const INSERT_EQUATION_COMMAND: LexicalCommand<CommandPayload> =
@@ -49,7 +50,9 @@ function $convertEquationElement(el: HTMLElement) {
     return null;
   }
   const inline = el.getAttribute('data-lexical-inline') === 'true';
-  return $createEquationNode(equation, inline);
+  // Absent attribute = exported before the latex flag existed = LaTeX.
+  const latex = el.getAttribute('data-lexical-latex') !== 'false';
+  return $createEquationNode(equation, inline, latex);
 }
 
 const EquationImportRule = /* @__PURE__ */ defineImportRule({
@@ -73,8 +76,8 @@ export const EquationsExtension = /* @__PURE__ */ defineExtension({
     editor.registerCommand<CommandPayload>(
       INSERT_EQUATION_COMMAND,
       payload => {
-        const {equation, inline} = payload;
-        const equationNode = $createEquationNode(equation, inline);
+        const {equation, inline, latex} = payload;
+        const equationNode = $createEquationNode(equation, inline, latex);
 
         if (inline) {
           $insertNodeIntoLeaf(equationNode);
@@ -99,8 +102,12 @@ export function InsertEquationDialog({
   onClose: () => void;
 }): JSX.Element {
   const onEquationConfirm = useCallback(
-    (equation: string, inline: boolean) => {
-      activeEditor.dispatchCommand(INSERT_EQUATION_COMMAND, {equation, inline});
+    (equation: string, inline: boolean, latex: boolean) => {
+      activeEditor.dispatchCommand(INSERT_EQUATION_COMMAND, {
+        equation,
+        inline,
+        latex,
+      });
       onClose();
     },
     [activeEditor, onClose],

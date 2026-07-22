@@ -15,16 +15,21 @@ import * as React from 'react';
 import {ReactNode, useEffect, useRef} from 'react';
 import {createPortal} from 'react-dom';
 
+import joinClasses from '../utils/joinClasses';
+
 function PortalImpl({
   onClose,
   children,
   title,
   closeOnClickOutside,
+  className,
 }: {
   children: ReactNode;
   closeOnClickOutside: boolean;
   onClose: () => void;
   title: string;
+  /** Extra class on the panel (e.g. a wider dialog for previews). */
+  className?: string;
 }) {
   const modalRef = useRef<HTMLDivElement>(null);
 
@@ -72,7 +77,10 @@ function PortalImpl({
 
   return (
     <div className="Modal__overlay" role="dialog">
-      <div className="Modal__modal" tabIndex={-1} ref={modalRef}>
+      <div
+        className={joinClasses('Modal__modal', className)}
+        tabIndex={-1}
+        ref={modalRef}>
         <h2 className="Modal__title">{title}</h2>
         <button
           className="Modal__closeButton"
@@ -92,17 +100,20 @@ export default function Modal({
   children,
   title,
   closeOnClickOutside = false,
+  className,
 }: {
   children: ReactNode;
   closeOnClickOutside?: boolean;
   onClose: () => void;
   title: string;
+  className?: string;
 }): JSX.Element {
   return createPortal(
     <PortalImpl
       onClose={onClose}
       title={title}
-      closeOnClickOutside={closeOnClickOutside}>
+      closeOnClickOutside={closeOnClickOutside}
+      className={className}>
       {children}
     </PortalImpl>,
     document.body,

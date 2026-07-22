@@ -34,7 +34,20 @@
 }
 
 .draggable-block-menu .icon:hover {
-  background-color: #efefef;
+  background-color: var(--ge-surface-2);
+  border-radius: 4px;
+}
+
+/* Dark mode: the handle / plus glyphs are black SVG background-images, which
+   are invisible on the dark editor surface — invert them to light and raise
+   their opacity so the floating menu is actually visible. */
+[data-theme='dark'] .draggable-block-menu .icon {
+  filter: invert(1);
+  opacity: 0.6;
+}
+
+[data-theme='dark'] .draggable-block-menu .icon:hover {
+  background-color: rgba(255, 255, 255, 0.15);
 }
 
 .draggable-block-target-line {
@@ -60,4 +73,6 @@
   outline: none;
   font-size: 14px;
   border-radius: 8px 8px 0 0;
+  background: var(--ge-surface);
+  color: var(--ge-text);
 }

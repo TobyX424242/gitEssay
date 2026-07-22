@@ -18,6 +18,7 @@ interface SerNode {
   url?: string;
   equation?: string;
   inline?: boolean;
+  latex?: boolean; // EquationNode: absent = pre-flag doc = LaTeX
   language?: string;
   src?: string;
   altText?: string;
@@ -47,7 +48,16 @@ function collectRuns(node: SerNode | undefined, linkUrl: string | null, runs: Te
   }
   if (node.type === 'equation') {
     const eq = String(node.equation ?? '').replace(/\s+/g, ' ').trim();
-    runs.push({text: ` ⟨EQ: ${eq.slice(0, 16)}⟩ `, format: 0, style: '', link: null});
+    // LaTeX equations are versioned on their RAW LaTeX source: show it in
+    // full (capped) so word-level diffs surface the actual change. Non-LaTeX
+    // equations keep the legacy short placeholder.
+    const shown =
+      node.latex === false
+        ? eq.slice(0, 16)
+        : eq.length > 200
+          ? eq.slice(0, 200) + '…'
+          : eq;
+    runs.push({text: ` ⟨EQ: ${shown}⟩ `, format: 0, style: '', link: null});
     return;
   }
   if (node.type === 'image') {
@@ -169,6 +179,10 @@ function emitBlocks(node: SerNode, out: DiffBlock[]): void {
 
 function eqLabel(n: SerNode): string {
   const eq = String(n.equation ?? '').replace(/\s+/g, ' ').trim();
+  // LaTeX equations: full raw source (capped); non-LaTeX: legacy placeholder.
+  if (n.latex !== false) {
+    return `EQ ${eq.length > 200 ? eq.slice(0, 200) + '…' : eq}`;
+  }
   return `EQ ${eq.length > 24 ? eq.slice(0, 24) + '…' : eq}`;
 }
 

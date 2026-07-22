@@ -4,6 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
+ *
  */
 
 .DialogActions {
@@ -11,6 +12,7 @@
   flex-direction: row;
   justify-content: right;
   margin-top: 20px;
+  gap: 8px;
 }
 
 .DialogButtonsList {
@@ -18,8 +20,5 @@
   flex-direction: column;
   justify-content: right;
   margin-top: 20px;
-}
-
-.DialogButtonsList button {
-  margin-bottom: 20px;
+  gap: 10px;
 }

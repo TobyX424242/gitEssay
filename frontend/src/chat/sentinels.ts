@@ -13,7 +13,7 @@
  * brackets avoid colliding with prose citations like `[1]`):
  *
  *   [[CITE:ab12cd34]]   — a CitationNode (identity = citationId)
- *   [[EQ:ef567890]]     — an EquationNode (identity = inline + equation text)
+ *   [[EQ:ef567890]]     — an EquationNode (identity = inline + latex flag + equation text)
  *
  * The 8-hex nonce is a DETERMINISTIC djb2 hash of (kind, node identity), so it
  * can be RE-DERIVED from the live document at apply time — no per-turn map has
@@ -27,6 +27,7 @@
 import {
   $getSelection,
   $isElementNode,
+  $isNodeSelection,
   $isRangeSelection,
   $isTextNode,
   type ElementNode,
@@ -54,9 +55,15 @@ export function citationIdNonce(citationId: string): string {
   return djb2('C ' + citationId);
 }
 
-/** Deterministic nonce for an equation, from inline flag + LaTeX (primitive). */
-export function equationContentNonce(inline: boolean, equation: string): string {
-  return djb2('E ' + (inline ? '1' : '0') + ' ' + equation);
+/** Deterministic nonce for an equation, from inline flag + latex flag + content. */
+export function equationContentNonce(
+  inline: boolean,
+  equation: string,
+  latex = true,
+): string {
+  return djb2(
+    'E ' + (inline ? '1' : '0') + ' ' + (latex ? '1' : '0') + ' ' + equation,
+  );
 }
 
 /** Deterministic nonce for a citation node (keyed on its stable citationId). */
@@ -64,9 +71,9 @@ export function citationNonce(node: CitationNode): string {
   return citationIdNonce(node.getCitationId());
 }
 
-/** Deterministic nonce for an equation node (keyed on inline flag + LaTeX). */
+/** Deterministic nonce for an equation node (inline + latex flag + content). */
 export function equationNonce(node: EquationNode): string {
-  return equationContentNonce(node.isInline(), node.getEquation());
+  return equationContentNonce(node.isInline(), node.getEquation(), node.isLatex());
 }
 
 export function citeSentinel(nonce: string): string {
@@ -173,15 +180,27 @@ export function itemsToText(items: InlineItem[]): string {
 
 /**
  * The current non-collapsed selection as sentinel-laden text (selection mode's
- * edit target). Returns null when there is no range selection. Boundary text
+ * edit target). Returns null when there is nothing referenceable. Boundary text
  * nodes are clamped to the anchor/focus offsets; atomic nodes fully inside the
  * selection become sentinels — consistent with `blockSentinelText`, so a patch
  * the model writes against this text locates correctly in the live document.
+ *
+ * A NODE selection of equation(s) (e.g. the user clicked an equation block) is
+ * also referenceable: it becomes just the equation token(s), so clicking a
+ * formula and asking the AI about it targets exactly that equation.
  */
 export function selectionToSentinelText(editor: LexicalEditor): string | null {
   let out: string | null = null;
   editor.getEditorState().read(() => {
     const sel = $getSelection();
+    if ($isNodeSelection(sel)) {
+      const tokens = sel
+        .getNodes()
+        .filter($isEquationNode)
+        .map(n => eqSentinel(equationNonce(n)));
+      out = tokens.length > 0 ? tokens.join(' ') : null;
+      return;
+    }
     if (!$isRangeSelection(sel) || sel.isCollapsed()) {
       return;
     }

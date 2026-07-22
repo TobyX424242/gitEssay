@@ -20,15 +20,24 @@
  */
 import type {LexicalEditor} from 'lexical';
 
-import {locateEdit, textContains} from './patch';
-import type {ChatEdit, ChatMessage} from './types';
+import {findEquationsByNonce, locateEdit, textContains, validateLatex} from './patch';
+import type {ChatEdit, ChatEqEdit, ChatMessage} from './types';
 
-export type PatchIssue = 'ok' | 'mis-copy' | 'stale' | 'invalid';
+export type PatchIssue = 'ok' | 'mis-copy' | 'stale' | 'invalid' | 'invalid-latex';
+
+/** One equation edit whose LaTeX failed KaTeX validation. */
+export interface LatexFailure {
+  nonce: string;
+  latex: string;
+  error: string;
+}
 
 export interface PatchClassification {
   issue: PatchIssue;
   /** For `issue === 'invalid'`, the specific reason (from locateEdit). */
   reason?: string;
+  /** For `issue === 'invalid-latex'`, every failing equation edit. */
+  latexFailures?: LatexFailure[];
 }
 
 /** Max automatic re-prompts of the AI for a mis-copied patch before giving up. */
@@ -48,6 +57,7 @@ export function classifyPatch(
   editor: LexicalEditor,
   edits: ChatEdit[],
   snapshot: string,
+  eqEdits: ChatEqEdit[] = [],
 ): PatchClassification {
   const paragraphs = snapshot.split(/\n\s*\n/);
   let anyMisCopy = false;
@@ -72,6 +82,33 @@ export function classifyPatch(
     // doc state. Re-prompting won't reliably fix it; fail the patch.
     return {issue: 'invalid', reason: r.reason};
   }
+
+  // Equation edits: a bad nonce is structural (the AI invented/mis-copied a
+  // token → invalid, same as a forged sentinel). Unparseable LaTeX is
+  // RETRYABLE: re-prompt the model to fix the syntax (bounded, see finalize).
+  const latexFailures: LatexFailure[] = [];
+  for (const e of eqEdits) {
+    const matches = findEquationsByNonce(editor, e.nonce);
+    if (matches.length === 0) {
+      return {
+        issue: 'invalid',
+        reason: 'edit references an equation that is not in the document',
+      };
+    }
+    if (matches.length > 1) {
+      return {
+        issue: 'invalid',
+        reason: 'edit references an ambiguous equation token',
+      };
+    }
+    const v = validateLatex(e.latex);
+    if ('error' in v) {
+      latexFailures.push({nonce: e.nonce, latex: e.latex, error: v.error});
+    }
+  }
+  if (latexFailures.length > 0) {
+    return {issue: 'invalid-latex', latexFailures};
+  }
   return {issue: anyMisCopy ? 'mis-copy' : 'ok'};
 }
 
@@ -89,6 +126,26 @@ export function patchFeedback(edits: ChatEdit[]): string {
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+/**
+ * The feedback message appended to history when re-prompting unparseable LaTeX
+ * in equation edits. The model must fix the syntax and re-submit the WHOLE
+ * patch (text edits included — the failed attempt was never applied).
+ */
+export function latexFeedback(failures: LatexFailure[]): string {
+  const details = failures
+    .slice(0, 3)
+    .map(
+      f =>
+        `- [[EQ:${f.nonce}]]: ${f.error} (in "${f.latex.slice(0, 80)}")`,
+    )
+    .join('\n');
+  return [
+    'Your previous patch contained LaTeX that KaTeX cannot parse, so the equation edit(s) were rejected:',
+    details,
+    'Fix the LaTeX syntax (it MUST parse under KaTeX — check braces, \\commands, and environments), then propose the whole patch again with the corrected equation edit(s). Keep every other edit unchanged.',
+  ].join('\n');
 }
 
 /**

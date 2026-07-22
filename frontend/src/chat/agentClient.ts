@@ -63,6 +63,33 @@ export function docParagraphs(editor: LexicalEditor): string[] {
 }
 
 /**
+ * The document's LaTeX equations as an explicit list for the agent: each
+ * [[EQ:nonce]] token in the paragraphs maps to one entry here carrying its
+ * raw LaTeX source, so the model can READ equations as LaTeX and address them
+ * in equation patches. Non-LaTeX equations stay fully opaque (legacy
+ * behaviour) and are not listed.
+ */
+export function docEquations(
+  editor: LexicalEditor,
+): Array<{nonce: string; inline: boolean; latex: string}> {
+  const out: Array<{nonce: string; inline: boolean; latex: string}> = [];
+  editor.getEditorState().read(() => {
+    for (const block of $getRoot().getChildren()) {
+      for (const it of blockInlineItems(block)) {
+        if (it.kind === 'eq' && it.node.isLatex()) {
+          out.push({
+            nonce: it.nonce,
+            inline: it.node.isInline(),
+            latex: it.node.getEquation(),
+          });
+        }
+      }
+    }
+  });
+  return out;
+}
+
+/**
  * Prior stored messages → the {role, content} turns sent to the model. Assistant
  * turns carry a compact note of the action taken so the model has context across
  * a multi-message conversation (e.g. resuming after it asked a question).
@@ -78,7 +105,8 @@ export function messagesToHistory(messages: ChatMessage[]): ChatTurn[] {
     }
     const a = m.action;
     if (a?.kind === 'patch') {
-      parts.push(`[Proposed ${(m.edits ?? []).length} edit(s): "${a.explanation}"]`);
+      const n = (m.edits ?? []).length + (m.eqEdits ?? []).length;
+      parts.push(`[Proposed ${n} edit(s): "${a.explanation}"]`);
     } else if (a?.kind === 'ask') {
       parts.push(`[Asked the user: "${a.question}"]`);
     } else if (a?.kind === 'finish') {
@@ -97,6 +125,7 @@ interface AgentEvent {
   step?: AgentStep;
   explanation?: string;
   edits?: {search: string; replace: string}[];
+  eq_edits?: {nonce: string; latex: string}[];
   question?: string;
   options?: string[];
   message?: string;
@@ -117,6 +146,16 @@ function noOpEdits(
     .filter(e => e.replace.trim() !== e.search.trim()); // drop unchanged text
 }
 
+/** Drop equation edits missing a nonce or with empty LaTeX (can't apply). */
+function noOpEqEdits(
+  edits: {nonce: string; latex: string}[],
+): NonNullable<ChatMessage['eqEdits']> {
+  return edits
+    .filter(e => typeof e.nonce === 'string' && e.nonce.trim().length > 0)
+    .filter(e => typeof e.latex === 'string' && e.latex.trim().length > 0)
+    .map(e => ({...e, state: 'pending' as ChatEditState}));
+}
+
 /**
  * Run the backend LangGraph agent to completion (or abort). Returns the finalized
  * assistant message. Throws on fatal non-abort errors (caller surfaces them).
@@ -128,6 +167,7 @@ export async function runAgentGraph(opts: AgentGraphOpts): Promise<ChatMessage> 
     mode: opts.mode,
     selection_text: opts.selectionText ?? '',
     doc_paragraphs: docParagraphs(opts.editor),
+    doc_equations: docEquations(opts.editor),
     history: opts.history,
     memory_enabled: opts.memoryEnabled,
   };
@@ -138,6 +178,7 @@ export async function runAgentGraph(opts: AgentGraphOpts): Promise<ChatMessage> 
   const steps: AgentStep[] = [];
   let action: AssistantAction | null = null;
   let edits: ChatMessage['edits'];
+  let eqEdits: ChatMessage['eqEdits'];
   let errorMessage: string | undefined;
 
   const res = await fetch('/api/agent/run', {
@@ -200,10 +241,12 @@ export async function runAgentGraph(opts: AgentGraphOpts): Promise<ChatMessage> 
           opts.onUpdate({steps: [...steps]});
         } else if (ev.type === 'patch') {
           const cleaned = noOpEdits(ev.edits ?? []);
-          if (cleaned.length === 0) {
+          const cleanedEq = noOpEqEdits(ev.eq_edits ?? []);
+          if (cleaned.length === 0 && cleanedEq.length === 0) {
             // All-no-op patch → downgrade to an advice turn (no empty card).
             action = null;
             edits = undefined;
+            eqEdits = undefined;
             if (!text.trim()) {
               text = 'No changes to apply.';
               opts.onUpdate({text});
@@ -211,8 +254,9 @@ export async function runAgentGraph(opts: AgentGraphOpts): Promise<ChatMessage> 
           } else {
             action = {kind: 'patch', explanation: ev.explanation ?? ''};
             edits = cleaned;
+            eqEdits = cleanedEq;
           }
-          opts.onUpdate({action: action ?? undefined, edits});
+          opts.onUpdate({action: action ?? undefined, edits, eqEdits});
         } else if (ev.type === 'ask') {
           action = {
             kind: 'ask',
@@ -231,12 +275,12 @@ export async function runAgentGraph(opts: AgentGraphOpts): Promise<ChatMessage> 
   } catch (err) {
     await reader.cancel().catch(() => {});
     if (isAbort(err)) {
-      return finalize(opts, text, thinking, steps, action, edits, undefined);
+      return finalize(opts, text, thinking, steps, action, edits, eqEdits, undefined);
     }
     throw err; // network drop / unexpected — let the caller surface it
   }
 
-  return finalize(opts, text, thinking, steps, action, edits, errorMessage);
+  return finalize(opts, text, thinking, steps, action, edits, eqEdits, errorMessage);
 }
 
 function finalize(
@@ -246,6 +290,7 @@ function finalize(
   steps: AgentStep[],
   action: AssistantAction | null,
   edits: ChatMessage['edits'],
+  eqEdits: ChatMessage['eqEdits'],
   error: string | undefined,
 ): ChatMessage {
   const msg: ChatMessage = {
@@ -257,6 +302,7 @@ function finalize(
     steps: steps.length > 0 ? steps : undefined,
     action,
     edits,
+    eqEdits,
     streaming: false,
   };
   if (error) {

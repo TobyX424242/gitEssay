@@ -59,7 +59,9 @@ export function buildRetryPlan(
     if (m.role !== 'assistant') {
       continue;
     }
-    const count = (m.edits ?? []).filter(e => e.state === 'applied').length;
+    const textCount = (m.edits ?? []).filter(e => e.state === 'applied').length;
+    const eqCount = (m.eqEdits ?? []).filter(e => e.state === 'applied').length;
+    const count = textCount + eqCount;
     if (count > 0) {
       const label = m.action?.kind === 'patch' ? m.action.explanation : undefined;
       items.push({msgId: m.id, label: label || 'AI edit', count});
@@ -77,13 +79,11 @@ export function buildRetryPlan(
   };
 }
 
-/** One revert step: undo this applied edit (reverse-swap replace→search). */
-export interface RevertStep {
-  msgId: string;
-  /** Index of the edit within its message's edits array (for setEditState). */
-  editIndex: number;
-  edit: ChatEdit;
-}
+/** One revert step: undo an applied edit (text: reverse-swap replace→search;
+ *  equation: restore the recorded prevLatex). */
+export type RevertStep =
+  | {kind: 'text'; msgId: string; editIndex: number; edit: ChatEdit}
+  | {kind: 'eq'; msgId: string; editIndex: number; nonce: string; prevLatex: string};
 
 /**
  * Flatten a plan into LIFO execution order: latest response first (it overlays
@@ -101,7 +101,19 @@ export function lifoRevertSteps(plan: RetryPlan): RevertStep[] {
       .map((e, i) => ({e, i}))
       .filter(({e}) => e.state === 'applied');
     for (const {e, i} of [...applied].reverse()) {
-      steps.push({msgId: it.msgId, editIndex: i, edit: e});
+      steps.push({kind: 'text', msgId: it.msgId, editIndex: i, edit: e});
+    }
+    const appliedEq = (msg.eqEdits ?? [])
+      .map((e, i) => ({e, i}))
+      .filter(({e}) => e.state === 'applied' && typeof e.prevLatex === 'string');
+    for (const {e, i} of [...appliedEq].reverse()) {
+      steps.push({
+        kind: 'eq',
+        msgId: it.msgId,
+        editIndex: i,
+        nonce: e.nonce,
+        prevLatex: e.prevLatex as string,
+      });
     }
   }
   return steps;

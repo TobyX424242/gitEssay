@@ -26,6 +26,18 @@ export interface ChatEdit {
   replace: string;
 }
 
+/**
+ * A LaTeX equation content edit — the ONLY way a patch may change an
+ * equation's LaTeX. `nonce` addresses the equation (its [[EQ:nonce]] token);
+ * `latex` is the complete new LaTeX source, validated with KaTeX before it is
+ * applied. Text patches never carry equation content (equations stay opaque
+ * sentinels there), so the text/equation boundary survives every AI edit.
+ */
+export interface ChatEqEdit {
+  nonce: string;
+  latex: string;
+}
+
 /** Lifecycle of a proposed edit in the UI. */
 export type ChatEditState =
   | 'pending'
@@ -107,6 +119,13 @@ export interface ChatMessage {
   /** Assistant only: proposed edits (LEGACY — superseded by action.patch; kept
    *  so previously-persisted messages still render their diff cards). */
   edits?: Array<ChatEdit & {state: ChatEditState}>;
+  /** Assistant only: proposed LaTeX equation edits. `prevLatex` is recorded
+   *  when an edit applies (drives Retry's LIFO revert); `failReason` carries
+   *  the KaTeX error when an edit is rejected for invalid LaTeX after the
+   *  re-prompt budget is exhausted. */
+  eqEdits?: Array<
+    ChatEqEdit & {state: ChatEditState; prevLatex?: string; failReason?: string}
+  >;
   /** Assistant only: error message if the call failed. */
   error?: string;
   /** Assistant only: true while this turn is still streaming (UI hint). */

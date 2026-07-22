@@ -31,6 +31,13 @@ describe('nonce derivation', () => {
     expect(equationContentNonce(true, 'x+y')).not.toBe(equationContentNonce(true, 'x*y'));
   });
 
+  it('the latex flag is part of the equation identity (defaults to latex)', () => {
+    expect(equationContentNonce(true, 'x', true)).not.toBe(
+      equationContentNonce(true, 'x', false),
+    );
+    expect(equationContentNonce(true, 'x')).toBe(equationContentNonce(true, 'x', true));
+  });
+
   it('a citation and an equation never share a nonce namespace (kind-prefixed hash)', () => {
     // The hash input is kind-prefixed, so even an unlucky value collision across
     // kinds is impossible for the same primitive input.

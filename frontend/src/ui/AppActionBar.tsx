@@ -26,6 +26,7 @@ import useModal from '../hooks/useModal';
 import ProjectSwitcher from '../projects/ProjectSwitcher';
 import {docFromHash} from '../utils/docSerialization';
 import Button from './Button';
+import {DialogActions} from './Dialog';
 import {useSidePanel} from './sidePanelStore';
 import ThemeToggle from './ThemeToggle';
 import './appBar.css';
@@ -199,15 +200,7 @@ function ShowClearDialog({
   return (
     <>
       Are you sure you want to clear the editor?
-      <div className="Modal__content">
-        <Button
-          onClick={() => {
-            editor.dispatchCommand(CLEAR_EDITOR_COMMAND, undefined);
-            editor.focus();
-            onClose();
-          }}>
-          Clear
-        </Button>{' '}
+      <DialogActions>
         <Button
           onClick={() => {
             editor.focus();
@@ -215,7 +208,16 @@ function ShowClearDialog({
           }}>
           Cancel
         </Button>
-      </div>
+        <Button
+          primary
+          onClick={() => {
+            editor.dispatchCommand(CLEAR_EDITOR_COMMAND, undefined);
+            editor.focus();
+            onClose();
+          }}>
+          Clear
+        </Button>
+      </DialogActions>
     </>
   );
 }

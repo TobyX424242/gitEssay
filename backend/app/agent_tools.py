@@ -111,19 +111,26 @@ def propose_patch(explanation: str, edits: list[dict]) -> str:
     from similar edits. Prefer "Clarify the data-collection steps" over "Clarify";
     "Soften the causality claim" over "Rephrase"; "Fix tense in the methods
     paragraph" over "Edit". Keep it a label, not a full sentence.
-    `edits` is a list of {"search": str, "replace": str} pairs. `search` is the
-    SHORTEST span that is unique in the document — usually a single sentence or
-    phrase (shorter matches more reliably than long) — copied CHARACTER-FOR-
-    CHARACTER from within ONE paragraph (never across paragraphs): reproduce every
-    space, punctuation mark, and quotation mark exactly as written, including any
-    curly/straight quotes and dashes. Do NOT reflow, reformat, re-punctuate, or
-    "fix" the passage. `replace` is the new text. You may emit several edits in
-    one call. Citations and equations appear in the document as OPAQUE TOKENS like
-    [[CITE:1a2b3c4d]] and [[EQ:9e8f7a6b]] — treat each token as a single
-    indivisible unit: copy it VERBATIM into search and replace; never modify,
-    split, merge, or invent one. To KEEP a token, copy it unchanged into replace;
-    to REMOVE it, omit the token from replace. Do NOT wrap anything in markdown
-    code fences."""
+    Each entry in `edits` is EITHER a text edit OR an equation edit — never both:
+    - TEXT edit: {"search": str, "replace": str}. `search` is the
+      SHORTEST span that is unique in the document — usually a single sentence or
+      phrase (shorter matches more reliably than long) — copied CHARACTER-FOR-
+      CHARACTER from within ONE paragraph (never across paragraphs): reproduce every
+      space, punctuation mark, and quotation mark exactly as written, including any
+      curly/straight quotes and dashes. Do NOT reflow, reformat, re-punctuate, or
+      "fix" the passage. `replace` is the new text.
+    - EQUATION edit: {"equation": str, "latex": str} — replaces the LaTeX
+      source of the equation whose [[EQ:nonce]] token equals `equation`. Use this
+      ONLY to change an equation's content; `latex` is the COMPLETE new LaTeX and
+      MUST parse under KaTeX (check braces, \\commands, environments). Never put
+      LaTeX source into a text edit's search/replace.
+    You may emit several edits in one call. Citations and equations appear in the
+    document as OPAQUE TOKENS like [[CITE:1a2b3c4d]] and [[EQ:9e8f7a6b]] — treat
+    each token as a single indivisible unit: copy it VERBATIM into search and
+    replace; never modify, split, merge, or invent one. To KEEP a token, copy it
+    unchanged into replace; to REMOVE it, omit the token from replace. The raw
+    LaTeX behind each [[EQ:nonce]] is listed with the document; read it from
+    there instead of guessing. Do NOT wrap anything in markdown code fences."""
     raise NotImplementedError("executed via the tools node in agent_graph.py")
 
 

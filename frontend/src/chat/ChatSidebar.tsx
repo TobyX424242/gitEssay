@@ -9,7 +9,7 @@
  * finish. read/search steps show as chips. A Stop button aborts mid-stream.
  */
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
-import {$getRoot, $getSelection, $isRangeSelection} from 'lexical';
+import {$getRoot, $getSelection, $isNodeSelection, $isRangeSelection} from 'lexical';
 import {createPortal} from 'react-dom';
 import {
   type JSX,
@@ -36,17 +36,26 @@ import {
   replaceMessage,
   setActiveConversation,
   setEditState,
+  setEqEditState,
   useConversations,
 } from './conversations';
 import Markdown from './Markdown';
-import {applyTextPatch, plainTextToBlocks, textContains} from './patch';
+import {
+  applyEquationPatch,
+  applyTextPatch,
+  findEquationsByNonce,
+  plainTextToBlocks,
+  textContains,
+} from './patch';
 import {
   classifyPatch,
+  latexFeedback,
   MAX_PATCH_ATTEMPTS,
   patchFeedback,
   withPatchFailure,
 } from './patchValidate';
 import {selectionToSentinelText} from './sentinels';
+import {$isEquationNode} from '../nodes/EquationNode';
 import {chatPanel, closePanel, openPanel, usePanelOpen, usePanelWidth} from './panelStore';
 import {
   addMemory,
@@ -59,6 +68,8 @@ import {
 import {useActiveProjectId} from '../projects/projectStore';
 import {useCompareMode} from '../ui/CompareMode';
 import {docParagraphs, messagesToHistory, runAgentGraph} from './agentClient';
+import useModal from '../hooks/useModal';
+import KatexRenderer from '../ui/KatexRenderer';
 import {buildRetryPlan, lifoRevertSteps} from './retry';
 import type {RetryPlan} from './retry';
 import type {ChatTurn} from '../rewrite/llmClient';
@@ -178,9 +189,12 @@ export default function ChatSidebar(): JSX.Element {
   const [showSettings, setShowSettings] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
   const [showList, setShowList] = useState(false);
-  const [selInfo, setSelInfo] = useState<{mode: 'selection' | 'document'; chars: number}>(
-    {mode: 'document', chars: 0},
-  );
+  const [selInfo, setSelInfo] = useState<{
+    mode: 'selection' | 'document';
+    chars: number;
+    /** Number of equations referenced via a node selection (clicked formula). */
+    eq: number;
+  }>({mode: 'document', chars: 0, eq: 0});
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // The message id kept in view during/after a retry (its target), so the live
@@ -214,17 +228,29 @@ export default function ChatSidebar(): JSX.Element {
     return () => document.body.classList.remove('ge-chat-open');
   }, [open, width]);
 
-  // Live context chip: selection vs full document.
+  // Live context chip: selection / referenced equation(s) vs full document.
   useEffect(() => {
     const probe = () => {
       editor.getEditorState().read(() => {
         const sel = $getSelection();
-        const next =
-          $isRangeSelection(sel) && !sel.isCollapsed()
-            ? {mode: 'selection' as const, chars: sel.getTextContent().length}
-            : {mode: 'document' as const, chars: 0};
+        let next: {mode: 'selection' | 'document'; chars: number; eq: number};
+        if ($isRangeSelection(sel) && !sel.isCollapsed()) {
+          next = {mode: 'selection', chars: sel.getTextContent().length, eq: 0};
+        } else {
+          // A clicked equation block is a NODE selection — it counts as
+          // referencing the formula to the AI (see selectionToSentinelText).
+          const eq = $isNodeSelection(sel)
+            ? sel.getNodes().filter($isEquationNode).length
+            : 0;
+          next =
+            eq > 0
+              ? {mode: 'selection', chars: 0, eq}
+              : {mode: 'document', chars: 0, eq: 0};
+        }
         setSelInfo(prev =>
-          prev.mode === next.mode && prev.chars === next.chars ? prev : next,
+          prev.mode === next.mode && prev.chars === next.chars && prev.eq === next.eq
+            ? prev
+            : next,
         );
       });
     };
@@ -360,9 +386,10 @@ export default function ChatSidebar(): JSX.Element {
       };
 
       // Multi-layer fallback: validate the patch the AI produced; re-prompt on a
-      // mis-copy (bounded), or mark it failed if the doc changed under the AI or
-      // the edit is structurally invalid.
+      // mis-copy or unparseable LaTeX (each bounded independently), or mark it
+      // failed if the doc changed under the AI or the edit is structurally invalid.
       let attempts = 0;
+      let latexAttempts = 0;
       const finalize = (
         msg: ChatMessage,
         accHistory: ChatTurn[],
@@ -382,17 +409,46 @@ export default function ChatSidebar(): JSX.Element {
             msg.action?.kind === 'patch' ? {...msg, snapshot} : msg,
           );
         }
-        if (msg.action?.kind === 'patch' && msg.edits && msg.edits.length > 0) {
-          const {issue, reason} = classifyPatch(editor, msg.edits, snapshot);
+        const hasPatchEdits =
+          (msg.edits?.length ?? 0) > 0 || (msg.eqEdits?.length ?? 0) > 0;
+        if (msg.action?.kind === 'patch' && hasPatchEdits) {
+          const cls = classifyPatch(editor, msg.edits ?? [], snapshot, msg.eqEdits ?? []);
+          const {issue, reason} = cls;
           if (issue === 'stale') {
             // The passage the AI was editing is gone from the live doc — the doc
             // changed while it worked. The patch can't complete; tell the user.
             return Promise.resolve(withPatchFailure(msg, 'stale', snapshot));
           }
           if (issue === 'invalid') {
-            // Structurally un-applicable (sentinel/structure). Re-prompting won't
-            // reliably fix it; fail the patch with the specific reason.
+            // Structurally un-applicable (sentinel/structure/bad equation token).
+            // Re-prompting won't reliably fix it; fail the patch with the reason.
             return Promise.resolve(withPatchFailure(msg, 'invalid', snapshot, reason));
+          }
+          if (issue === 'invalid-latex') {
+            // Unparseable LaTeX in an equation edit — RETRYABLE: re-prompt the
+            // model to fix the syntax (bounded). Past the budget, reject ONLY the
+            // failing equation edits; text edits stay pending for the user.
+            latexAttempts += 1;
+            if (latexAttempts > MAX_PATCH_ATTEMPTS) {
+              const failures = cls.latexFailures ?? [];
+              const eqEdits = (msg.eqEdits ?? []).map(e => {
+                const f = failures.find(x => x.nonce === e.nonce);
+                return f ? {...e, state: 'rejected' as const, failReason: f.error} : e;
+              });
+              return Promise.resolve({...msg, eqEdits, snapshot});
+            }
+            const failedText =
+              msg.text?.trim() || '(proposed a patch with invalid LaTeX)';
+            const feedback = latexFeedback(cls.latexFailures ?? []);
+            // Accumulate prior attempts (same anti-rotation rationale as mis-copy).
+            const nextHistory: ChatTurn[] = [
+              ...accHistory,
+              {role: 'user', content: prevInstruction},
+              {role: 'assistant', content: failedText},
+            ];
+            return runOnce(nextHistory, feedback).then(m =>
+              finalize(m, nextHistory, feedback),
+            );
           }
           if (issue === 'mis-copy') {
             attempts += 1;
@@ -403,7 +459,7 @@ export default function ChatSidebar(): JSX.Element {
             // copy the SEARCH text verbatim, then re-validate the new patch.
             const failedText =
               msg.text?.trim() || '(proposed a patch that did not match the document)';
-            const feedback = patchFeedback(msg.edits);
+            const feedback = patchFeedback(msg.edits ?? []);
             // Accumulate every prior attempt so the model sees all failures (not
             // just the latest) and doesn't rotate back to a known-bad transcription.
             const nextHistory: ChatTurn[] = [
@@ -532,6 +588,17 @@ export default function ChatSidebar(): JSX.Element {
       let revertErrored = false;
       try {
         for (const step of lifoRevertSteps(plan)) {
+          if (step.kind === 'eq') {
+            // Equation edit: restore the LaTeX recorded when it was applied.
+            const res = await applyEquationPatch(editor, step.nonce, step.prevLatex);
+            if ('prevLatex' in res) {
+              undone++;
+              await setEqEditState(plan.convId, step.msgId, step.editIndex, 'reverted');
+            } else {
+              failed++;
+            }
+            continue;
+          }
           const e = step.edit;
           if (e.replace.trim() === '') {
             // Deletions can't be reverse-swapped (the swap searches for the
@@ -695,6 +762,7 @@ export default function ChatSidebar(): JSX.Element {
       try {
         const label = msg.action.explanation;
         const edits = msg.edits ?? [];
+        const eqEdits = msg.eqEdits ?? [];
         let appliedAny = false;
         let staleCount = 0;
         const snapshot = msg.snapshot ?? '';
@@ -725,6 +793,30 @@ export default function ChatSidebar(): JSX.Element {
             if (isStale) {
               staleCount++;
             }
+          }
+        }
+        // Equation edits: dedicated LaTeX patches, applied after the text edits.
+        // applyEquationPatch re-validates the LaTeX (KaTeX) before touching the
+        // document, so a bad formula can never corrupt the rendered equation.
+        for (let i = 0; i < eqEdits.length; i++) {
+          if (eqEdits[i].state !== 'pending') {
+            continue;
+          }
+          const res = await applyEquationPatch(editor, eqEdits[i].nonce, eqEdits[i].latex);
+          if ('prevLatex' in res) {
+            appliedAny = true;
+            // Record prevLatex so a later Retry can LIFO-revert this edit.
+            await setEqEditState(convId, msgId_, i, 'applied', {
+              prevLatex: res.prevLatex,
+            });
+          } else {
+            await setEqEditState(
+              convId,
+              msgId_,
+              i,
+              res.kind === 'invalid-latex' ? 'rejected' : 'unlocatable',
+              {failReason: res.reason},
+            );
           }
         }
         if (appliedAny) {
@@ -763,6 +855,29 @@ export default function ChatSidebar(): JSX.Element {
         return;
       }
       void setEditState(convId, msgId_, editIdx, 'rejected');
+    },
+    [active],
+  );
+
+  /** Equation-edit counterparts of rejectEdit / restoreEdit. */
+  const rejectEqEdit = useCallback(
+    (msgId_: string, editIdx: number) => {
+      const convId = active?.id;
+      if (!convId) {
+        return;
+      }
+      void setEqEditState(convId, msgId_, editIdx, 'rejected');
+    },
+    [active],
+  );
+
+  const restoreEqEdit = useCallback(
+    (msgId_: string, editIdx: number) => {
+      const convId = active?.id;
+      if (!convId) {
+        return;
+      }
+      void setEqEditState(convId, msgId_, editIdx, 'pending');
     },
     [active],
   );
@@ -816,7 +931,9 @@ export default function ChatSidebar(): JSX.Element {
 
   const ctxLabel =
     selInfo.mode === 'selection'
-      ? `Selection · ${selInfo.chars} chars`
+      ? selInfo.eq > 0
+        ? `${selInfo.eq} equation${selInfo.eq === 1 ? '' : 's'}`
+        : `Selection · ${selInfo.chars} chars`
       : 'Full document';
 
   const sendDisabled = !input.trim() || loading || !active || !!pendingRetry;
@@ -844,7 +961,9 @@ export default function ChatSidebar(): JSX.Element {
             className={`chat-ctx chat-ctx--${selInfo.mode}`}
             title={
               selInfo.mode === 'selection'
-                ? 'The AI will edit your selection'
+                ? selInfo.eq > 0
+                  ? 'The AI will work on the clicked equation(s)'
+                  : 'The AI will edit your selection'
                 : 'The AI sees the whole document'
             }>
             {ctxLabel}
@@ -1041,6 +1160,11 @@ export default function ChatSidebar(): JSX.Element {
                 onAcceptPatch={() => acceptPatch(m.id)}
                 onRejectEdit={i => rejectEdit(m.id, i)}
                 onRestoreEdit={i => restoreEdit(m.id, i)}
+                onRejectEqEdit={i => rejectEqEdit(m.id, i)}
+                onRestoreEqEdit={i => restoreEqEdit(m.id, i)}
+                resolveEquation={nonce =>
+                  findEquationsByNonce(editor, nonce)[0]?.equation
+                }
                 onAcceptEditLegacy={(i, e, label) =>
                   acceptEditLegacy(m.id, i, e.search, e.replace, label)
                 }
@@ -1059,6 +1183,11 @@ export default function ChatSidebar(): JSX.Element {
               onAcceptPatch={() => acceptPatch(streaming.id)}
               onRejectEdit={i => rejectEdit(streaming.id, i)}
               onRestoreEdit={i => restoreEdit(streaming.id, i)}
+              onRejectEqEdit={i => rejectEqEdit(streaming.id, i)}
+              onRestoreEqEdit={i => restoreEqEdit(streaming.id, i)}
+              resolveEquation={nonce =>
+                findEquationsByNonce(editor, nonce)[0]?.equation
+              }
               onAcceptEditLegacy={(i, e, label) =>
                 acceptEditLegacy(streaming.id, i, e.search, e.replace, label)
               }
@@ -1090,7 +1219,9 @@ export default function ChatSidebar(): JSX.Element {
             onKeyDown={onComposerKey}
             placeholder={
               selInfo.mode === 'selection'
-                ? 'Ask the AI to edit your selection…'
+                ? selInfo.eq > 0
+                  ? 'Ask the AI about the clicked equation…'
+                  : 'Ask the AI to edit your selection…'
                 : 'Ask the AI about your document…'
             }
             rows={2}
@@ -1134,6 +1265,9 @@ function MessageBubble({
   onAcceptPatch,
   onRejectEdit,
   onRestoreEdit,
+  onRejectEqEdit,
+  onRestoreEqEdit,
+  resolveEquation,
   onAcceptEditLegacy,
   onRetry,
   onAskReply,
@@ -1147,6 +1281,11 @@ function MessageBubble({
   onRejectEdit: (editIdx: number) => void;
   /** Undo an accidental reject (restore a pruned edit to pending). */
   onRestoreEdit: (editIdx: number) => void;
+  /** Equation-edit counterparts of onRejectEdit / onRestoreEdit. */
+  onRejectEqEdit: (editIdx: number) => void;
+  onRestoreEqEdit: (editIdx: number) => void;
+  /** Resolve an [[EQ:nonce]] token to the equation's CURRENT LaTeX (diff old side). */
+  resolveEquation: (nonce: string) => string | undefined;
   /** Legacy per-edit accept (messages with `edits` but no `action`). */
   onAcceptEditLegacy: (editIdx: number, edit: {search: string; replace: string}, label: string) => void;
   onRetry: (assistantId: string) => void;
@@ -1159,6 +1298,51 @@ function MessageBubble({
       ),
     [message.edits],
   );
+  // Equation edit diffs: old side = prevLatex (once applied) or the equation's
+  // current live LaTeX; new side = the proposed LaTeX.
+  const eqEditOps = useMemo(
+    () =>
+      (message.eqEdits ?? []).map(e =>
+        diffBlocks(
+          plainTextToBlocks(e.prevLatex ?? resolveEquation(e.nonce) ?? ''),
+          plainTextToBlocks(e.latex),
+        ),
+      ),
+    [message.eqEdits, resolveEquation],
+  );
+
+  const [eqModal, showEqModal] = useModal();
+
+  // Visualization for an equation edit: full KaTeX render of BEFORE (the
+  // equation's current/previous LaTeX) vs AFTER (the proposed LaTeX).
+  const showEqViz = (nonce: string, before: string, after: string) => {
+    const pane = (label: string, source: string, accent: 'before' | 'after') => (
+      <div className="eqviz-pane">
+        <div className={`eqviz-pane-header eqviz-pane-header--${accent}`}>
+          {label}
+        </div>
+        <div className="eqviz-pane-body">
+          {source.trim() ? (
+            <KatexRenderer equation={source} inline={false} onDoubleClick={() => null} />
+          ) : (
+            <span className="eqviz-empty">(equation not found)</span>
+          )}
+        </div>
+        <div className="eqviz-src">{source || ' '}</div>
+      </div>
+    );
+    showEqModal(
+      `Equation [[EQ:${nonce}]]`,
+      () => (
+        <div className="eqviz-grid">
+          {pane('Before', before, 'before')}
+          {pane('After', after, 'after')}
+        </div>
+      ),
+      true,
+      'eqviz-modal',
+    );
+  };
 
   // Thoughts pane: open while streaming, collapsed once finalized (VS Code-style).
   const [thinkOpen, setThinkOpen] = useState(live);
@@ -1178,21 +1362,34 @@ function MessageBubble({
   // the three-dot working indicator below already covers the busy state.
   const showThinking = hasThinking;
   const edits = message.edits ?? [];
+  const eqEdits = message.eqEdits ?? [];
   const isAtomicPatch = message.action?.kind === 'patch';
   const patchLabel =
     message.action?.kind === 'patch' ? message.action.explanation : undefined;
-  const hasPendingEdit = edits.some(e => e.state === 'pending');
-  const pendingEditCount = edits.filter(e => e.state === 'pending').length;
+  const hasPendingEdit =
+    edits.some(e => e.state === 'pending') ||
+    eqEdits.some(e => e.state === 'pending');
+  const pendingEditCount =
+    edits.filter(e => e.state === 'pending').length +
+    eqEdits.filter(e => e.state === 'pending').length;
   // The patch is sealed once the action-level Accept has run (any edit applied or
   // unlocatable) or it was reverted for retry — before that, a rejected edit can
   // still be restored to pending.
-  const actionSealed = edits.some(
-    e =>
-      e.state === 'applied' ||
-      e.state === 'unlocatable' ||
-      e.state === 'stale' ||
-      e.state === 'reverted',
-  );
+  const actionSealed =
+    edits.some(
+      e =>
+        e.state === 'applied' ||
+        e.state === 'unlocatable' ||
+        e.state === 'stale' ||
+        e.state === 'reverted',
+    ) ||
+    eqEdits.some(
+      e =>
+        e.state === 'applied' ||
+        e.state === 'unlocatable' ||
+        e.state === 'stale' ||
+        e.state === 'reverted',
+    );
 
   if (message.role === 'user') {
     return (
@@ -1277,7 +1474,7 @@ function MessageBubble({
         </div>
       ) : (
         <>
-          {patchLabel && edits.length > 0 && (
+          {patchLabel && (edits.length > 0 || eqEdits.length > 0) && (
             <div className="chat-edit-explanation">✎ {patchLabel}</div>
           )}
           {edits.map((e, i) => (
@@ -1343,6 +1540,63 @@ function MessageBubble({
                     {e.state === 'stale'
                       ? '⚠ The original text changed while the AI was working — can’t apply'
                       : '⚠ Couldn’t locate this passage (it may have changed)'}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {/* Equation edits: dedicated LaTeX patches (old → new LaTeX). */}
+          {eqEdits.map((e, i) => (
+            <div key={`eq-${i}`} className="chat-edit">
+              <div className="chat-edit-label">
+                Equation edit <code>{`[[EQ:${e.nonce}]]`}</code>
+              </div>
+              <div className="chat-edit-diff">
+                <DiffView ops={eqEditOps[i]} />
+              </div>
+              <div className="chat-edit-actions">
+                <button
+                  type="button"
+                  className="cp-button cp-button--ghost"
+                  title="Render the equation before and after this edit"
+                  onClick={() =>
+                    showEqViz(e.nonce, e.prevLatex ?? resolveEquation(e.nonce) ?? '', e.latex)
+                  }>
+                  Visualize
+                </button>
+                {e.state === 'pending' && isAtomicPatch && (
+                  <button
+                    type="button"
+                    className="cp-button cp-button--ghost"
+                    onClick={() => onRejectEqEdit(i)}>
+                    Reject
+                  </button>
+                )}
+                {e.state === 'applied' && (
+                  <span className="chat-edit-status chat-edit-status--ok">✓ Applied</span>
+                )}
+                {e.state === 'reverted' && (
+                  <span className="chat-edit-status">↩ Reverted</span>
+                )}
+                {e.state === 'rejected' &&
+                  (e.failReason ? (
+                    <span className="chat-edit-status chat-edit-status--err">
+                      ⚠ Invalid LaTeX — rejected: {e.failReason}
+                    </span>
+                  ) : actionSealed ? (
+                    <span className="chat-edit-status">Rejected</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="cp-button cp-button--ghost chat-edit-undo"
+                      onClick={() => onRestoreEqEdit(i)}>
+                      ↩ Undo reject
+                    </button>
+                  ))}
+                {(e.state === 'unlocatable' || e.state === 'stale') && (
+                  <span className="chat-edit-status chat-edit-status--err">
+                    ⚠ Couldn’t locate this equation (it may have changed)
                   </span>
                 )}
               </div>
@@ -1433,6 +1687,7 @@ function MessageBubble({
           </button>
         </div>
       )}
+      {eqModal}
     </div>
   );
 }

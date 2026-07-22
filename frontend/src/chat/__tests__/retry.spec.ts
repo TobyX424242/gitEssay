@@ -109,7 +109,12 @@ describe('lifoRevertSteps', () => {
       'a1#1',
       'a1#0',
     ]);
-    expect(steps.map(s => s.edit.search)).toEqual(['s4', 's3', 's2', 's1']);
+    expect(steps.map(s => (s.kind === 'text' ? s.edit.search : s.nonce))).toEqual([
+      's4',
+      's3',
+      's2',
+      's1',
+    ]);
   });
 
   it('only steps over edits still in applied state', () => {
@@ -120,6 +125,18 @@ describe('lifoRevertSteps', () => {
     const steps = lifoRevertSteps(buildRetryPlan(msgs, 'a1')!);
     expect(steps).toHaveLength(1);
     expect(steps[0].editIndex).toBe(0);
+  });
+
+  it('includes applied equation edits as eq revert steps (with prevLatex)', () => {
+    const msg = assistant('a1', [], 'v1');
+    msg.eqEdits = [
+      {nonce: 'ab12cd34', latex: 'E=mc^2', state: 'applied', prevLatex: 'E=mc'},
+      {nonce: 'ffffffff', latex: 'y', state: 'rejected'}, // not reverted
+    ];
+    const steps = lifoRevertSteps(buildRetryPlan([user('u1', 'go'), msg], 'a1')!);
+    expect(steps).toEqual([
+      {kind: 'eq', msgId: 'a1', editIndex: 0, nonce: 'ab12cd34', prevLatex: 'E=mc'},
+    ]);
   });
 
   it('skips items whose message is missing from the snapshot', () => {

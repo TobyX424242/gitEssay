@@ -7,6 +7,15 @@
  *
  */
 
+/**
+ * Unified dialog style (gitEssay): every modal rendered through `useModal` /
+ * `ui/Modal` shares this design with the literature / settings panels
+ * (`.mem-panel`, `.ai-panel`). All colors come from the `--ge-*` theme tokens
+ * (see themes/darkMode.css), so light/dark mode both work without overrides.
+ * New dialogs should reuse `useModal` + `ui/Button` + `ui/TextInput` +
+ * `ui/Dialog` (DialogActions) instead of hand-rolling styles.
+ */
+
 .Modal__overlay {
   display: flex;
   justify-content: center;
@@ -17,46 +26,64 @@
   bottom: 0px;
   left: 0px;
   right: 0px;
-  background-color: rgba(40, 40, 40, 0.6);
+  background-color: rgba(0, 0, 0, 0.45);
   flex-grow: 0px;
   flex-shrink: 1px;
-  z-index: 100;
+  z-index: 320;
+  padding: 16px;
+  box-sizing: border-box;
 }
 .Modal__modal {
-  padding: 20px;
+  padding: 0px;
   min-height: 100px;
-  min-width: 300px;
+  min-width: 320px;
+  max-width: 96vw;
+  max-height: 84vh;
   display: flex;
   flex-grow: 0px;
-  background-color: #fff;
+  background-color: var(--ge-surface);
+  color: var(--ge-text);
   flex-direction: column;
   position: relative;
-  box-shadow: 0 0 20px 0 #444;
-  border-radius: 10px;
+  border: 1px solid var(--ge-border);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.Modal__modal:focus {
+  outline: none;
 }
 .Modal__title {
-  color: #444;
+  color: var(--ge-text);
   margin: 0px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid #ccc;
+  padding: 12px 44px 12px 16px;
+  border-bottom: 1px solid var(--ge-border);
+  background: var(--ge-surface-2);
+  font-size: 14px;
+  font-weight: 700;
 }
 .Modal__closeButton {
   border: 0px;
   position: absolute;
-  right: 20px;
-  border-radius: 20px;
+  right: 10px;
+  top: 7px;
+  border-radius: 4px;
   justify-content: center;
   align-items: center;
   display: flex;
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   text-align: center;
   cursor: pointer;
-  background-color: #eee;
+  background-color: transparent;
+  color: var(--ge-text-muted);
+  font-size: 13px;
 }
 .Modal__closeButton:hover {
-  background-color: #ddd;
+  background-color: var(--ge-surface);
+  color: var(--ge-text);
 }
 .Modal__content {
-  padding-top: 20px;
+  padding: 16px;
+  overflow-y: auto;
 }

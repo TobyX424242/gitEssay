@@ -1790,6 +1790,11 @@ button.toolbar-item.active i {
 .editor-equation {
   cursor: default;
   user-select: none;
+  /* KaTeX auto-numbers \begin{equation} via the GLOBAL CSS counter
+     katexEqnNo (reset only on <body>), so every render on the page — editor,
+     chat, preview modals — would keep incrementing it. Reset per equation
+     block so each formula renders independently, numbered from (1). */
+  counter-reset: katexEqnNo 0;
 }
 
 span.editor-equation {
@@ -1798,6 +1803,12 @@ span.editor-equation {
 
 .editor-equation.focused {
   outline: 2px solid rgb(60, 132, 244);
+}
+
+/* Non-LaTeX equation: raw source shown verbatim as plain text. */
+.editor-equation-plain-text {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 button.item i {

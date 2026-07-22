@@ -25,6 +25,7 @@ import {type JSX, useState} from 'react';
 
 import {$createCitationNode, CitationNode} from '../../nodes/CitationNode';
 import Button from '../../ui/Button';
+import {DialogActions} from '../../ui/Dialog';
 
 export interface CitationPayload {
   label?: string;
@@ -96,24 +97,28 @@ export function InsertCitationDialog({
     onClose();
   };
   return (
-    <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
-      <input
-        className="cp-input"
-        autoFocus
-        placeholder="Citation text (e.g. Smith 2020, or [1])"
-        value={label}
-        onChange={e => setLabel(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            confirm();
-          }
-        }}
-      />
-      <div className="Modal__content">
-        <Button onClick={confirm}>Insert</Button>{' '}
-        <Button onClick={onClose}>Cancel</Button>
+    <>
+      <div className="Input__wrapper">
+        <input
+          className="Input__input"
+          autoFocus
+          placeholder="Citation text (e.g. Smith 2020, or [1])"
+          value={label}
+          onChange={e => setLabel(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              confirm();
+            }
+          }}
+        />
       </div>
-    </div>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button primary onClick={confirm}>
+          Insert
+        </Button>
+      </DialogActions>
+    </>
   );
 }

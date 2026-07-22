@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "description": "gitEssay \u2014 academic writing surface built on a forked Lexical playground (diff + checkpoint)",
+  "description": "gitEssay — academic writing surface built on a forked Lexical playground (diff + checkpoint)",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -50,7 +50,9 @@
     "react-day-picker": "^9.14.0",
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",

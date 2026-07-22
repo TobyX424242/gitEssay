@@ -66,7 +66,7 @@ export function InsertTableDialog({
         type="number"
       />
       <DialogActions data-test-id="table-model-confirm-insert">
-        <Button disabled={isDisabled} onClick={onClick}>
+        <Button primary disabled={isDisabled} onClick={onClick}>
           Confirm
         </Button>
       </DialogActions>

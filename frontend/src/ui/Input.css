@@ -7,6 +7,8 @@
  *
  */
 
+/* Unified dialog input — themed via --ge-* tokens (light + dark). */
+
 .Input__wrapper {
   display: flex;
   flex-direction: row;
@@ -16,17 +18,24 @@
 .Input__label {
   display: flex;
   flex: 1;
-  color: #666;
+  color: var(--ge-text-muted);
+  font-size: 13px;
 }
 .Input__input {
   display: flex;
   flex: 2;
-  border: 1px solid #999;
+  border: 1px solid var(--ge-border);
+  background: var(--ge-surface);
+  color: var(--ge-text);
   padding-top: 7px;
   padding-bottom: 7px;
   padding-left: 10px;
   padding-right: 10px;
-  font-size: 16px;
-  border-radius: 5px;
+  font-size: 14px;
+  border-radius: 6px;
   min-width: 0;
+}
+.Input__input:focus {
+  outline: 2px solid var(--ge-accent);
+  outline-offset: -1px;
 }

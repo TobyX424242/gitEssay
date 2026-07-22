@@ -196,19 +196,8 @@
   border-left-color: var(--ge-border);
 }
 
-/* Modals + dialogs */
-[data-theme='dark'] .Modal__overlay {
-  background: rgba(0, 0, 0, 0.6);
-}
-[data-theme='dark'] .Modal__modal,
-[data-theme='dark'] .Modal__content {
-  background: var(--ge-surface-2);
-  color: var(--ge-text);
-  border: 1px solid var(--ge-border);
-}
-[data-theme='dark'] .Modal__title {
-  color: var(--ge-text);
-}
+/* Modals + dialogs: ui/Modal.css is fully token-based (--ge-*), so no dark
+   overrides are needed here — both themes share one implementation. */
 
 /* Native selection + scrollbars follow the scheme */
 [data-theme='dark'] ::selection {

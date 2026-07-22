@@ -27,13 +27,19 @@ import {
 
 import type {DiffBlock, TextRun} from '../diff/types';
 import {$createCitationNode} from '../nodes/CitationNode';
-import {$createEquationNode} from '../nodes/EquationNode';
+import {
+  $createEquationNode,
+  $isEquationNode,
+} from '../nodes/EquationNode';
+import katex from 'katex';
 import type {AssistantAction, ChatEdit} from './types';
 import {
   blockInlineItems,
   citeSentinel,
   eqSentinel,
+  equationNonce,
   itemsToText,
+  SENTINEL_RE,
   type InlineItem,
   parseSegments,
   type Segment,
@@ -816,7 +822,11 @@ function sentinelSplice(block: ElementNode, needle: string, segs: Segment[]): vo
       return $createCitationNode(got.node.getLabel(), got.node.getCitationId());
     }
     if (got.kind === 'eq') {
-      return $createEquationNode(got.node.getEquation(), got.node.isInline());
+      return $createEquationNode(
+        got.node.getEquation(),
+        got.node.isInline(),
+        got.node.isLatex(),
+      );
     }
     return null;
   };
@@ -884,4 +894,137 @@ function sentinelSplice(block: ElementNode, needle: string, segs: Segment[]): vo
     }
     removeNodes.forEach(n => n.remove());
   }
+}
+
+// --- equation patches --------------------------------------------------------
+/**
+ * LaTeX equation CONTENT edits arrive as dedicated equation patches
+ * ({equation: nonce, latex}) — never inside a text patch's search/replace,
+ * where equations stay opaque [[EQ:nonce]] sentinels. The proposed LaTeX is
+ * validated with KaTeX BEFORE the document is touched; a patch that fails
+ * validation leaves the equation (and its rendering) untouched.
+ */
+
+/** A live LaTeX equation node matching a sentinel nonce. */
+export interface EquationMatch {
+  key: string;
+  equation: string;
+  inline: boolean;
+}
+
+/**
+ * All live LaTeX equation nodes whose sentinel nonce matches (normally 0 or 1;
+ * >1 means a real hash collision and the edit is refused rather than guessed).
+ * Non-LaTeX equations are invisible here: they keep the legacy behaviour
+ * (opaque to the agent, never content-editable by a patch).
+ */
+export function findEquationsByNonce(
+  editor: LexicalEditor,
+  nonce: string,
+): EquationMatch[] {
+  const matches: EquationMatch[] = [];
+  const wanted = nonce.toLowerCase();
+  editor.getEditorState().read(() => {
+    for (const block of $getRoot().getChildren()) {
+      for (const it of blockInlineItems(block)) {
+        if (
+          it.kind === 'eq' &&
+          it.nonce === wanted &&
+          it.node.isLatex() &&
+          equationNonce(it.node) === wanted
+        ) {
+          matches.push({
+            key: it.node.getKey(),
+            equation: it.node.getEquation(),
+            inline: it.node.isInline(),
+          });
+        }
+      }
+    }
+  });
+  return matches;
+}
+
+/**
+ * Validate that `latex` parses under KaTeX with the same leniency as the
+ * renderer (strict: 'warn'), but throwing on real syntax errors. Also rejects
+ * forged sentinel tokens inside the LaTeX, which would break the opaque-token
+ * invariant the text-patch protection relies on.
+ */
+export function validateLatex(
+  latex: string,
+): {ok: true} | {ok: false; error: string} {
+  const src = latex.trim();
+  if (!src) {
+    return {ok: false, error: 'empty LaTeX source'};
+  }
+  if (SENTINEL_RE.test(src)) {
+    return {
+      ok: false,
+      error: 'LaTeX must not contain [[CITE:…]]/[[EQ:…]] tokens',
+    };
+  }
+  try {
+    katex.renderToString(src, {
+      displayMode: true,
+      output: 'html',
+      strict: 'warn',
+      throwOnError: true,
+      trust: false,
+    });
+    return {ok: true};
+  } catch (err) {
+    return {ok: false, error: err instanceof Error ? err.message : String(err)};
+  }
+}
+
+export type EqPatchResult =
+  | {ok: true; prevLatex: string}
+  | {
+      ok: false;
+      kind: 'not-found' | 'ambiguous' | 'invalid-latex';
+      reason: string;
+    };
+
+/**
+ * Apply one equation patch: replace the LaTeX source of the UNIQUE live
+ * equation carrying `nonce`. Validation happens first — an unparseable or
+ * forged LaTeX is refused without mutating the document. On success returns
+ * the previous LaTeX (recorded as `prevLatex` for Retry's LIFO revert).
+ */
+export async function applyEquationPatch(
+  editor: LexicalEditor,
+  nonce: string,
+  latex: string,
+): Promise<EqPatchResult> {
+  const v = validateLatex(latex);
+  if ('error' in v) {
+    return {ok: false, kind: 'invalid-latex', reason: v.error};
+  }
+  const matches = findEquationsByNonce(editor, nonce);
+  if (matches.length === 0) {
+    return {
+      ok: false,
+      kind: 'not-found',
+      reason: 'equation not found in the document',
+    };
+  }
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      kind: 'ambiguous',
+      reason: 'equation token matches multiple equations',
+    };
+  }
+  const target = matches[0];
+  const src = latex.trim();
+  // Await so callers (retry reverts, checkpoints) see the COMMITTED state.
+  await editor.update(() => {
+    const node = $getNodeByKey(target.key);
+    // Re-verify identity in the update state (read refs are invalid here).
+    if ($isEquationNode(node) && equationNonce(node) === nonce.toLowerCase()) {
+      node.setEquation(src);
+    }
+  });
+  return {ok: true, prevLatex: target.equation};
 }

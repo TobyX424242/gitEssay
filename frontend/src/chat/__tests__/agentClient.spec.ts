@@ -8,6 +8,8 @@ import {
 } from 'lexical';
 
 import {runAgentGraph} from '../agentClient';
+import {$createEquationNode, EquationNode} from '../../nodes/EquationNode';
+import {equationContentNonce} from '../sentinels';
 
 /** Build a Lexical editor whose root contains the given paragraph texts. */
 async function makeEditor(paras: string[]): Promise<LexicalEditor> {
@@ -17,6 +19,20 @@ async function makeEditor(paras: string[]): Promise<LexicalEditor> {
     for (const p of paras) {
       root.append($createParagraphNode().append($createTextNode(p)));
     }
+  });
+  return editor;
+}
+
+/** An editor containing one inline LaTeX equation inside a paragraph. */
+async function makeEqEditor(): Promise<LexicalEditor> {
+  const editor = createEditor({nodes: [EquationNode]});
+  await editor.update(() => {
+    $getRoot().append(
+      $createParagraphNode().append(
+        $createTextNode('Energy is '),
+        $createEquationNode('E=mc^2', true, true),
+      ),
+    );
   });
   return editor;
 }
@@ -125,6 +141,31 @@ describe('runAgentGraph (LangGraph engine)', () => {
       replace: 'Hello, world.',
       state: 'pending',
     });
+  });
+
+  it('sends doc_equations and parses eq_edits from a patch event', async () => {
+    const editor = await makeEqEditor();
+    stubFetch([
+      {
+        type: 'patch',
+        explanation: 'Fix the energy equation',
+        edits: [],
+        eq_edits: [
+          {nonce: 'ab12cd34', latex: 'E=mc^{2}'},
+          {nonce: '', latex: 'y'}, // malformed → dropped
+        ],
+      },
+      {type: 'done'},
+    ]);
+
+    const msg = await runAgentGraph(baseOpts(editor) as any);
+
+    // The live LaTeX listing is shipped so the agent can read equations.
+    expect(lastBody.doc_equations).toEqual([
+      {nonce: equationContentNonce(true, 'E=mc^2', true), inline: true, latex: 'E=mc^2'},
+    ]);
+    expect(msg.action).toEqual({kind: 'patch', explanation: 'Fix the energy equation'});
+    expect(msg.eqEdits).toEqual([{nonce: 'ab12cd34', latex: 'E=mc^{2}', state: 'pending'}]);
   });
 
   it('an all-no-op patch downgrades to an advice turn (no empty card)', async () => {

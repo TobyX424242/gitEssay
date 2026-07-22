@@ -105,6 +105,37 @@ def _history_to_messages(history: list) -> list:
     return msgs
 
 
+def _split_edits(raw_edits) -> tuple[list[dict], list[dict]]:
+    """Split propose_patch edits into TEXT edits ({search, replace}) and
+    EQUATION edits ({equation: nonce, latex} → {nonce, latex}). An edit is one
+    or the other — the presence of a non-empty `equation` key decides."""
+    edits: list[dict] = []
+    eq_edits: list[dict] = []
+    for e in raw_edits or []:
+        get = e.get if isinstance(e, dict) else lambda k, d="": getattr(e, k, d)
+        if get("equation"):
+            eq_edits.append({"nonce": get("equation"), "latex": get("latex")})
+        else:
+            edits.append({"search": get("search"), "replace": get("replace")})
+    return edits, eq_edits
+
+
+def _equation_listing(equations) -> list[str]:
+    """Render the document's LaTeX equations as an explicit listing so the agent
+    can read each [[EQ:nonce]] token as a LaTeX equation block."""
+    eqs = [e for e in (equations or []) if isinstance(e, dict) and e.get("nonce")]
+    if not eqs:
+        return []
+    lines = [
+        "",
+        "LaTeX equations in the document (each [[EQ:nonce]] token above refers to one of these — it is a LaTeX equation block, not plain text):",
+    ]
+    for e in eqs:
+        mode = "inline" if e.get("inline") else "display"
+        lines.append(f"[[EQ:{e['nonce']}]] ({mode}): {e.get('latex', '')}")
+    return lines
+
+
 def _initial_user_message(req) -> str:
     if req.mode == "selection" and req.selection_text:
         return "\n".join([
@@ -112,6 +143,7 @@ def _initial_user_message(req) -> str:
             '"""',
             req.selection_text,
             '"""',
+            *_equation_listing(req.doc_equations),
             "",
             f"User request: {req.instruction}",
             "",
@@ -123,6 +155,7 @@ def _initial_user_message(req) -> str:
         '"""',
         full,
         '"""',
+        *_equation_listing(req.doc_equations),
         "",
         f"User request: {req.instruction}",
     ])
@@ -145,6 +178,7 @@ def _seed_state(req, ctx: RunContext) -> dict:
     return {
         "messages": messages,
         "doc_paragraphs": paragraphs,
+        "doc_equations": [e for e in (req.doc_equations or []) if isinstance(e, dict)],
         "steps": [],
         "terminal": None,
         "read_hits": read_hits,
@@ -370,15 +404,17 @@ def _run_subagent(ctx: RunContext, task: str, literature_ids: list, include_docu
             include_document=include_document,
         )
         doc_paragraphs = list(parent_state.get("doc_paragraphs") or []) if include_document else []
+        doc_equations = list(parent_state.get("doc_equations") or []) if include_document else []
         messages = [SystemMessage(content=prompt)]
         if include_document and doc_paragraphs:
             messages.append(
-                HumanMessage(content='Current document for context:\n"""' + "\n\n".join(doc_paragraphs) + '\n"""')
+                HumanMessage(content='Current document for context:\n"""' + "\n\n".join(doc_paragraphs) + '\n"""' + "\n".join(_equation_listing(doc_equations)))
             )
         messages.append(HumanMessage(content="Begin. Return your report as the final message."))
         sub_state = {
             "messages": messages,
             "doc_paragraphs": doc_paragraphs,
+            "doc_equations": doc_equations,
             "steps": [],
             "terminal": None,
             "read_hits": {"": len(doc_paragraphs)} if doc_paragraphs else {},
@@ -518,13 +554,8 @@ def build_graph(ctx: RunContext):
 
             elif name == "propose_patch":
                 explanation = args.get("explanation") or ""
-                edits = []
-                for e in args.get("edits") or []:
-                    if isinstance(e, dict):
-                        edits.append({"search": e.get("search", ""), "replace": e.get("replace", "")})
-                    else:  # Pydantic model instance (EditInput-shaped)
-                        edits.append({"search": getattr(e, "search", ""), "replace": getattr(e, "replace", "")})
-                terminal = {"kind": "patch", "explanation": explanation, "edits": edits}
+                edits, eq_edits = _split_edits(args.get("edits"))
+                terminal = {"kind": "patch", "explanation": explanation, "edits": edits, "eq_edits": eq_edits}
                 new_messages.append(ToolMessage(content="Patch proposed. The user will review it. Stop now.", tool_call_id=tcid))
 
             elif name == "ask_user":
@@ -635,6 +666,7 @@ async def run_agent_stream(req, s, db):
                             "type": "patch",
                             "explanation": term.get("explanation", ""),
                             "edits": term.get("edits", []),
+                            "eq_edits": term.get("eq_edits", []),
                         }
                     elif term.get("kind") == "ask":
                         yield {
