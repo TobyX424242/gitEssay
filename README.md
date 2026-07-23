@@ -13,7 +13,7 @@ cite it: documents are parsed by docling (structure-aware chunks + figure
 images), indexed for **hybrid RAG** (FTS5 keywords + optional embeddings), and
 explored by **nested analysis subagents** the main agent dispatches on demand.
 
-No accounts, no auth, no collaboration — by design (see `PLAN.md §10`).
+No accounts, no auth, no collaboration — by design
 
 ## Architecture
 
@@ -138,9 +138,6 @@ GE_TEST_DOCLING=1 uv run pytest          # incl. the real-docling parse smoke te
 ## Docs
 
 - `README.md` (this file) — current state, quick start.
-- `PLAN.md` — the original v2 design plan (historical; a banner at the top
-  records where the implementation diverged).
-- `REVIEW.md` — 2026-07 code review: findings, fixes applied, tech-debt list.
 - `DESKTOP.md` — desktop port: feasibility analysis, packaging, data dirs,
   cross-platform CI build.
 - `backend/README.md` — backend API reference.
