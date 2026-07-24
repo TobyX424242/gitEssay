@@ -182,8 +182,8 @@ class AISettings(Base):
     api_key = Column(String, nullable=False, default="")
     model = Column(String, nullable=False, default="gpt-4o-mini")
     temperature = Column(Float, nullable=False, default=0.7)
-    max_input_tokens = Column(Integer, nullable=False, default=16000)
-    max_output_tokens = Column(Integer, nullable=False, default=8000)
+    max_input_tokens = Column(Integer, nullable=False, default=256000)
+    max_output_tokens = Column(Integer, nullable=False, default=32000)
     # User-declared model capability: may the agent send images (literature
     # figures) to the model? Off by default — when off, read_figure returns
     # caption/context text only.
