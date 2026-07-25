@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
 
+from app import bg
 from app.db import SessionLocal
 from app.literature_search import embed_texts, fts_enabled, index_chunk_fts
 from app.literature_summary import start_summary
@@ -306,7 +307,7 @@ def _extract_pdf_tiered(db: Session, lit: Literature, path: str, progress_frac) 
 
 # --- ingest driver -----------------------------------------------------------
 def start_ingest(literature_id: str) -> None:
-    threading.Thread(target=_ingest_safe, args=(literature_id,), daemon=True).start()
+    bg.spawn(_ingest_safe, literature_id)
 
 
 def _ingest_safe(literature_id: str) -> None:

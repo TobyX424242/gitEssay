@@ -6,10 +6,37 @@ The model is consumed by the LangGraph agent (agent_graph.py); tool binding
 happens in the graph. Server-side keys stay server-side — the browser never sees
 api_key.
 """
+import threading
+
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 
 from app.models import AISettings
+
+# Building a chat model per request re-creates the HTTP client and provider
+# bookkeeping every time. This is a single-user app with one settings row, so
+# cache the built model for the current config and drop it the moment any
+# settings field changes (the key below covers every build_model input).
+_cache: dict[tuple, object] = {}
+_cache_lock = threading.Lock()
+
+
+def build_model_cached(s: AISettings):
+    key = (
+        s.provider_format,
+        s.base_url,
+        s.api_key,
+        s.model,
+        s.temperature,
+        s.max_output_tokens,
+    )
+    with _cache_lock:
+        model = _cache.get(key)
+        if model is None:
+            model = build_model(s)
+            _cache.clear()
+            _cache[key] = model
+    return model
 
 
 def _norm_anthropic_base(base: str) -> str:

@@ -57,7 +57,33 @@ type ImageStatus =
   | {error: true}
   | {error: false; width: number; height: number};
 
+// Bounded LRU (Map preserves insertion order): an unbounded cache would grow
+// for the whole session as images come and go. Promote on read, evict the
+// oldest entry past the cap.
+const IMAGE_CACHE_CAP = 100;
 const imageCache = new Map<string, Promise<ImageStatus> | ImageStatus>();
+
+function imageCacheGet(
+  src: string,
+): Promise<ImageStatus> | ImageStatus | undefined {
+  const value = imageCache.get(src);
+  if (value !== undefined) {
+    imageCache.delete(src);
+    imageCache.set(src, value);
+  }
+  return value;
+}
+
+function imageCacheSet(src: string, value: Promise<ImageStatus> | ImageStatus) {
+  imageCache.delete(src);
+  imageCache.set(src, value);
+  if (imageCache.size > IMAGE_CACHE_CAP) {
+    const oldest = imageCache.keys().next().value;
+    if (oldest !== undefined) {
+      imageCache.delete(oldest);
+    }
+  }
+}
 
 export const RIGHT_CLICK_IMAGE_COMMAND: LexicalCommand<MouseEvent> =
   /* @__PURE__ */ createCommand('RIGHT_CLICK_IMAGE_COMMAND');
@@ -84,7 +110,7 @@ function DisableCaptionOnBlur({
 }
 
 function useSuspenseImage(src: string): ImageStatus {
-  let cached = imageCache.get(src);
+  let cached = imageCacheGet(src);
   if (cached && 'error' in cached && typeof cached.error === 'boolean') {
     return cached;
   } else if (!cached) {
@@ -99,10 +125,10 @@ function useSuspenseImage(src: string): ImageStatus {
         });
       img.onerror = () => resolve({error: true});
     }).then(rval => {
-      imageCache.set(src, rval);
+      imageCacheSet(src, rval);
       return rval;
     });
-    imageCache.set(src, cached);
+    imageCacheSet(src, cached);
     throw cached;
   }
   throw cached;

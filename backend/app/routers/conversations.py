@@ -95,16 +95,18 @@ def set_active_conversation(
 def patch_conversation(
     cid: str, body: schemas.ConversationPatch, db: Session = Depends(get_db)
 ):
-    conv = db.get(Conversation, cid)
-    if conv is None:
-        raise HTTPException(status_code=404, detail="conversation not found")
-    if body.title is not None:
-        conv.title = body.title
-    if body.messages is not None:
-        conv.messages = json.dumps(body.messages)
-    conv.updated_at = now_ms()
-    db.commit()
-    return to_out(conv)
+    # Same read-modify-write race as append/replace below — take the lock.
+    with _messages_lock:
+        conv = db.get(Conversation, cid)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="conversation not found")
+        if body.title is not None:
+            conv.title = body.title
+        if body.messages is not None:
+            conv.messages = json.dumps(body.messages)
+        conv.updated_at = now_ms()
+        db.commit()
+        return to_out(conv)
 
 
 @router.post("/conversations/{cid}/messages", response_model=schemas.ConversationOut)

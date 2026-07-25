@@ -6,7 +6,7 @@
  *
  */
 
-import type {JSX} from 'react';
+import type {JSX, RefObject} from 'react';
 
 import './ColorPicker.css';
 
@@ -16,8 +16,6 @@ import {useMemo, useRef, useState} from 'react';
 
 import {isKeyboardInput} from '../utils/focusUtils';
 import TextInput from './TextInput';
-
-let skipAddingToHistoryStack = false;
 
 interface ColorPickerProps {
   color: string;
@@ -62,6 +60,9 @@ export default function ColorPicker({
     transformColor('hex', color).hex,
   );
   const innerDivRef = useRef(null);
+  // Per-instance (was a module-level `let` shared by every ColorPicker on the
+  // page — one instance mid-drag poisoned the history behavior of all others).
+  const skipAddingToHistoryStackRef = useRef(false);
 
   const saturationPosition = useMemo(
     () => ({
@@ -81,7 +82,7 @@ export default function ColorPicker({
   const emitOnChange = (newColor: string, skipRefocus: boolean = false) => {
     // Check if the dropdown is actually active
     if (innerDivRef.current !== null && onChange) {
-      onChange(newColor, skipAddingToHistoryStack, skipRefocus);
+      onChange(newColor, skipAddingToHistoryStackRef.current, skipRefocus);
     }
   };
 
@@ -142,7 +143,8 @@ export default function ColorPicker({
       <MoveWrapper
         className="color-picker-saturation"
         style={{backgroundColor: `hsl(${selfColor.hsv.h}, 100%, 50%)`}}
-        onChange={onMoveSaturation}>
+        onChange={onMoveSaturation}
+        skipHistoryRef={skipAddingToHistoryStackRef}>
         <div
           className="color-picker-saturation_cursor"
           style={{
@@ -152,7 +154,10 @@ export default function ColorPicker({
           }}
         />
       </MoveWrapper>
-      <MoveWrapper className="color-picker-hue" onChange={onMoveHue}>
+      <MoveWrapper
+        className="color-picker-hue"
+        onChange={onMoveHue}
+        skipHistoryRef={skipAddingToHistoryStackRef}>
         <div
           className="color-picker-hue_cursor"
           style={{
@@ -179,9 +184,18 @@ interface MoveWrapperProps {
   style?: React.CSSProperties;
   onChange: (position: Position) => void;
   children: JSX.Element;
+  // Owned by the parent ColorPicker (shared by its saturation + hue pickers);
+  // set while dragging so history-stack pushes are coalesced into one entry.
+  skipHistoryRef: RefObject<boolean>;
 }
 
-function MoveWrapper({className, style, onChange, children}: MoveWrapperProps) {
+function MoveWrapper({
+  className,
+  style,
+  onChange,
+  children,
+  skipHistoryRef,
+}: MoveWrapperProps) {
   const divRef = useRef<HTMLDivElement>(null);
   const draggedRef = useRef(false);
 
@@ -206,13 +220,13 @@ function MoveWrapper({className, style, onChange, children}: MoveWrapperProps) {
 
     const onMouseMove = (_e: MouseEvent): void => {
       draggedRef.current = true;
-      skipAddingToHistoryStack = true;
+      skipHistoryRef.current = true;
       move(_e);
     };
 
     const onMouseUp = (_e: MouseEvent): void => {
       if (draggedRef.current) {
-        skipAddingToHistoryStack = false;
+        skipHistoryRef.current = false;
       }
 
       document.removeEventListener('mousemove', onMouseMove, false);

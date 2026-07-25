@@ -10,6 +10,8 @@ The function bodies raise to make accidental direct invocation obvious.
 `do_read` / `_filter_paragraphs` / `_cap` are ports of the frontend's former
 read/search helpers so the backend returns the same-shaped results.
 """
+from typing import Optional
+
 from langchain.tools import tool
 
 READ_CHAR_CAP = 24000
@@ -88,7 +90,7 @@ def read_figure(literature_id: str, image_seq: int) -> str:
 
 
 @tool
-def delegate_task(task: str, literature_ids: list[str] = [], include_document: bool = False) -> str:
+def delegate_task(task: str, literature_ids: Optional[list[str]] = None, include_document: bool = False) -> str:
     """Dispatch a subagent to work autonomously on an analysis sub-task and
     report back. Use for work that needs several lookup rounds and would
     clutter this conversation: summarizing a paper, comparing methods across

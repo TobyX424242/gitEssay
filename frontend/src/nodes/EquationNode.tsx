@@ -19,6 +19,8 @@ import katex from 'katex';
 import {$applyNodeReplacement, DecoratorNode, DOMExportOutput} from 'lexical';
 import * as React from 'react';
 
+import {b64EncodeUnicode} from '../utils/base64';
+
 const EquationComponent = React.lazy(() => import('./EquationComponent'));
 
 export type SerializedEquationNode = Spread<
@@ -93,8 +95,9 @@ export class EquationNode extends DecoratorNode<JSX.Element> {
 
   exportDOM(): DOMExportOutput {
     const element = document.createElement(this.__inline ? 'span' : 'div');
-    // Encode the equation as base64 to avoid issues with special characters
-    const equation = btoa(this.__equation);
+    // Encode the equation as base64 to avoid issues with special characters.
+    // Unicode-safe: raw btoa throws InvalidCharacterError on LaTeX like ∀/∑/α.
+    const equation = b64EncodeUnicode(this.__equation);
     element.setAttribute('data-lexical-equation', equation);
     element.setAttribute('data-lexical-inline', `${this.__inline}`);
     element.setAttribute('data-lexical-latex', `${this.__latex}`);

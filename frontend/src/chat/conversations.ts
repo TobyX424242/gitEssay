@@ -15,6 +15,7 @@ import {
   useProjects,
 } from '../projects/projectStore';
 import {api} from '../utils/api';
+import {createVersionedStore} from '../utils/store';
 import type {ChatEditState, ChatMessage} from './types';
 
 export interface Conversation {
@@ -35,26 +36,11 @@ interface ApiConversation {
   updated_at: number;
 }
 
-// --- pub/sub ---------------------------------------------------------------
-type Listener = () => void;
-const listeners = new Set<Listener>();
-let version = 0;
-
-function emit(): void {
-  version++;
-  listeners.forEach(l => l());
-}
-
-export function subscribe(fn: Listener): () => void {
-  listeners.add(fn);
-  return () => {
-    listeners.delete(fn);
-  };
-}
-
-export function getVersion(): number {
-  return version;
-}
+// --- pub/sub (shared primitive, see utils/store.ts) --------------------------
+const store = createVersionedStore();
+const emit = store.emit;
+export const subscribe = store.subscribe;
+export const getVersion = store.getVersion;
 
 // --- reads -----------------------------------------------------------------
 async function listConversations(projectId: string): Promise<Conversation[]> {

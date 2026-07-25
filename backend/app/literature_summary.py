@@ -20,11 +20,10 @@ Runs on a daemon thread with its own DB session; failures flip summary_status
 to 'failed' and never affect the parsed document.
 """
 import logging
-import threading
 
 from sqlalchemy.orm import Session
 
-from app import ai
+from app import ai, bg
 from app.db import SessionLocal
 from app.literature_search import read_section
 from app.models import AISettings, Literature, LiteratureChunk
@@ -138,7 +137,7 @@ def start_summary(literature_id: str) -> None:
         db.commit()
     finally:
         db.close()
-    threading.Thread(target=_summary_safe, args=(literature_id,), daemon=True).start()
+    bg.spawn(_summary_safe, literature_id)
 
 
 def _summary_safe(literature_id: str) -> None:

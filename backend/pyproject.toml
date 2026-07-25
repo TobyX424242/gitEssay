@@ -26,6 +26,12 @@ dependencies = [
     # prunes opencv-python from the resolution.
     "opencv-python-headless>=4.10",
     "edgeparse>=0.2.5",
+    # LLM API key storage in the OS keychain (macOS Keychain / Windows
+    # Credential Manager / Linux Secret Service), with a DB fallback when no
+    # backend exists (Docker, headless) — see app/secrets.py.
+    "keyring>=25",
+    # Exponential-backoff retries for transient LLM gateway failures (ai.py).
+    "tenacity>=9",
 ]
 
 [dependency-groups]

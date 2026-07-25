@@ -10,7 +10,6 @@ import type {JSX, KeyboardEvent, Ref, RefObject} from 'react';
 
 import './EquationEditor.css';
 
-import {isHTMLElement} from 'lexical';
 import {ChangeEvent, forwardRef} from 'react';
 
 type BaseEquationEditorProps = {
@@ -40,7 +39,11 @@ function EquationEditor(
     }
   };
 
-  return inline && isHTMLElement(forwardedRef) ? (
+  // The inline/block choice is purely a prop concern: forwardedRef is a
+  // RefObject/RefCallback (never an HTMLElement), so the old
+  // `isHTMLElement(forwardedRef)` guard was always false and every inline
+  // equation fell through to the block textarea.
+  return inline ? (
     <span className="EquationEditor_inputBackground">
       <span className="EquationEditor_dollarSign">$</span>
       <input

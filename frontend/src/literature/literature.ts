@@ -10,6 +10,7 @@
 import {useEffect, useSyncExternalStore, useState} from 'react';
 
 import {api} from '../utils/api';
+import {createVersionedStore} from '../utils/store';
 
 export type LiteratureStatus = 'processing' | 'ready' | 'error';
 
@@ -66,26 +67,8 @@ export interface LiteratureDetail extends Literature {
   summary: string | null;
 }
 
-// --- store (version-bumped refetch, same pattern as chat/memories.ts) -------
-type Listener = () => void;
-const listeners = new Set<Listener>();
-let version = 0;
-
-function emit(): void {
-  version++;
-  listeners.forEach(l => l());
-}
-
-function subscribe(fn: Listener): () => void {
-  listeners.add(fn);
-  return () => {
-    listeners.delete(fn);
-  };
-}
-
-function getVersion(): number {
-  return version;
-}
+// --- store (version-bumped refetch; shared primitive, see utils/store.ts) ----
+const {emit, subscribe, getVersion} = createVersionedStore();
 
 export async function listLiterature(pid: string): Promise<Literature[]> {
   return api.get<Literature[]>(`/projects/${pid}/literature`);

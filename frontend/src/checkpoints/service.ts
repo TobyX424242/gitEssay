@@ -14,30 +14,16 @@ import {
 
 import {getActiveProjectId} from '../projects/projectStore';
 import {api} from '../utils/api';
+import {createVersionedStore} from '../utils/store';
 import type {Checkpoint, CheckpointSource} from './types';
 
 export type {Checkpoint, CheckpointSource} from './types';
 
-// --- pub/sub ---------------------------------------------------------------
-type Listener = () => void;
-const listeners = new Set<Listener>();
-let version = 0;
-
-export function subscribe(fn: Listener): () => void {
-  listeners.add(fn);
-  return () => {
-    listeners.delete(fn);
-  };
-}
-
-export function getVersion(): number {
-  return version;
-}
-
-function emit(): void {
-  version++;
-  listeners.forEach(l => l());
-}
+// --- pub/sub (shared primitive, see utils/store.ts) --------------------------
+const store = createVersionedStore();
+const emit = store.emit;
+export const subscribe = store.subscribe;
+export const getVersion = store.getVersion;
 
 interface ApiCheckpoint {
   id: string;

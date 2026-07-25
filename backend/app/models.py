@@ -3,6 +3,7 @@ import time
 import uuid
 from sqlalchemy import Boolean, Column, Float, ForeignKey, Integer, String, Text
 
+from app import secrets
 from app.db import Base
 
 # A valid empty Lexical SerializedEditorState (root + one empty paragraph).
@@ -179,7 +180,11 @@ class AISettings(Base):
     id = Column(Integer, primary_key=True)  # always 1 (single-row, single-user)
     provider_format = Column(String, nullable=False, default="openai")
     base_url = Column(String, nullable=False, default="https://api.openai.com/v1")
-    api_key = Column(String, nullable=False, default="")
+    # The API key lives in the OS keychain when available (see app/secrets.py);
+    # this column is only the fallback for keychain-less environments (Docker,
+    # headless Linux) and stays empty otherwise. Access it via the `api_key`
+    # property below, never via `_api_key` directly.
+    _api_key = Column("api_key", String, nullable=False, default="")
     model = Column(String, nullable=False, default="gpt-4o-mini")
     temperature = Column(Float, nullable=False, default=0.7)
     max_input_tokens = Column(Integer, nullable=False, default=256000)
@@ -191,3 +196,14 @@ class AISettings(Base):
     # Optional embedding model for semantic literature search, served from the
     # same OpenAI-compatible base_url (/embeddings). Empty = FTS keyword-only.
     embedding_model = Column(String, nullable=False, default="")
+
+    @property
+    def api_key(self) -> str:
+        """Effective API key — OS keychain value wins over the DB fallback."""
+        return secrets.get_api_key(self._api_key or "")
+
+    @api_key.setter
+    def api_key(self, value: str) -> None:
+        # secrets.set_api_key returns "" when the keychain accepted the key
+        # (DB column cleared), or the value itself for the DB fallback.
+        self._api_key = secrets.set_api_key(value)

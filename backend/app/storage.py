@@ -39,9 +39,20 @@ def sweep_orphan_dirs(valid_ids: set[str]) -> list[str]:
     removed: list[str] = []
     if not os.path.isdir(root):
         return removed
+    root_real = os.path.realpath(root)
     for name in os.listdir(root):
         path = os.path.join(root, name)
+        # Never follow symlinks: a planted symlink (e.g. literature/foo -> /)
+        # would make rmtree delete outside the literature dir. os.path.isdir
+        # follows links, so check the resolved target stays under root too.
+        if os.path.islink(path):
+            continue
         if os.path.isdir(path) and name not in valid_ids:
+            if (
+                os.path.commonpath([os.path.realpath(path), root_real])
+                != root_real
+            ):
+                continue
             shutil.rmtree(path, ignore_errors=True)
             removed.append(name)
     return removed

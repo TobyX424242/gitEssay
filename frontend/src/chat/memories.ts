@@ -11,6 +11,7 @@
 import {useEffect, useSyncExternalStore, useState} from 'react';
 
 import {api} from '../utils/api';
+import {createVersionedStore} from '../utils/store';
 
 export interface Memory {
   id: string;
@@ -31,26 +32,8 @@ interface ApiMemory {
   created_at: number;
 }
 
-// --- memories list (per active project) ------------------------------------
-type Listener = () => void;
-const listeners = new Set<Listener>();
-let version = 0;
-
-function emit(): void {
-  version++;
-  listeners.forEach(l => l());
-}
-
-function subscribe(fn: Listener): () => void {
-  listeners.add(fn);
-  return () => {
-    listeners.delete(fn);
-  };
-}
-
-function getVersion(): number {
-  return version;
-}
+// --- memories list (per active project; shared primitive, see utils/store.ts)
+const {emit, subscribe, getVersion} = createVersionedStore();
 
 export async function loadMemories(pid: string): Promise<Memory[]> {
   const rows = await api.get<ApiMemory[]>(`/projects/${pid}/memories`);
@@ -114,18 +97,7 @@ function readEnabled(): boolean {
 }
 
 let enabled = readEnabled();
-const prefListeners = new Set<Listener>();
-
-function emitPref(): void {
-  prefListeners.forEach(l => l());
-}
-
-function subscribePref(fn: Listener): () => void {
-  prefListeners.add(fn);
-  return () => {
-    prefListeners.delete(fn);
-  };
-}
+const {emit: emitPref, subscribe: subscribePref} = createVersionedStore();
 
 export function isMemoryEnabled(): boolean {
   return enabled;

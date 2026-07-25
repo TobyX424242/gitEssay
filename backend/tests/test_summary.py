@@ -109,8 +109,8 @@ def test_start_summary_skips_when_unconfigured(db, project, ready_lit, monkeypat
     s.api_key = ""
     db.commit()
     started = []
-    monkeypatch.setattr(literature_summary.threading, "Thread",
-                        lambda *a, **k: started.append(a) or type("T", (), {"start": lambda self: None})())
+    monkeypatch.setattr(literature_summary.bg, "spawn",
+                        lambda *a, **k: started.append(a))
     start_summary(ready_lit.id)
     db.refresh(ready_lit)
     assert ready_lit.summary_status == "skipped"

@@ -55,7 +55,10 @@ from app.agent_tools import (
     search_literature as search_literature_tool,
 )
 from app.literature_search import literature_index, read_section, search_chunks
-from app.llm import build_model
+# Imported under the name `build_model` so tests can keep monkeypatching
+# `agent_graph.build_model`; the cached variant avoids rebuilding the model
+# (HTTP client etc.) on every request.
+from app.llm import build_model_cached as build_model
 from app.models import Literature, LiteratureImage, Memory, new_id, now_ms
 from app.storage import abs_path
 
@@ -97,11 +100,19 @@ class RunContext:
 
 # --- input shaping ---------------------------------------------------------
 def _history_to_messages(history: list) -> list:
+    """Frontend history turns → LangChain messages. Roles are mapped strictly:
+    a typo'd/unknown role must fail loudly here instead of being silently
+    relabeled as a user turn (which would corrupt the conversation context)."""
     msgs = []
     for t in history or []:
         role = t.get("role")
         content = t.get("content", "")
-        msgs.append(AIMessage(content=content) if role == "assistant" else HumanMessage(content=content))
+        if role == "assistant":
+            msgs.append(AIMessage(content=content))
+        elif role == "user":
+            msgs.append(HumanMessage(content=content))
+        else:
+            raise ValueError(f"unknown history role: {role!r}")
     return msgs
 
 
@@ -680,5 +691,9 @@ async def run_agent_stream(req, s, db):
                             "options": term.get("options", []),
                         }
         yield {"type": "done"}
-    except Exception as e:  # noqa: BLE001 — never let the generator die silently
+    # Expected failure categories surface as a clean error event. Anything
+    # else propagates to the router's catch-all (routers/ai.py), which also
+    # emits an error event — the stream never dies silently either way.
+    except (RuntimeError, ValueError, KeyError, TypeError) as e:
+        log.exception("agent run failed")
         yield {"type": "error", "message": str(e)}

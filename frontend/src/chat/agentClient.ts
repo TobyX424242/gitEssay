@@ -195,11 +195,15 @@ export async function runAgentGraph(opts: AgentGraphOpts): Promise<ChatMessage> 
   let appendEdits: ChatMessage['appendEdits'];
   let errorMessage: string | undefined;
 
+  // Guard against a hung backend holding the SSE connection open forever:
+  // cap the whole run at 5 min, combined with the caller's cancel signal.
   const res = await fetch('/api/agent/run', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body),
-    signal: opts.signal,
+    signal: opts.signal
+      ? AbortSignal.any([opts.signal, AbortSignal.timeout(300_000)])
+      : AbortSignal.timeout(300_000),
   });
   if (!res.ok) {
     let message = `HTTP ${res.status}`;

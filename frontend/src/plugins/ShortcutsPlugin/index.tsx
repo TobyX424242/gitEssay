@@ -68,6 +68,9 @@ export default function ShortcutsPlugin({
   setIsLinkEditMode: Dispatch<boolean>;
 }): null {
   const {toolbarState} = useToolbarState();
+  // Derived (was a toolbarState key synced via useEffect): the font-size input
+  // value is just fontSize without the 'px' suffix.
+  const fontSizeInputValue = toolbarState.fontSize.slice(0, -2);
 
   useEffect(() => {
     const keyboardShortcutsHandler = (event: KeyboardEvent) => {
@@ -120,13 +123,13 @@ export default function ShortcutsPlugin({
         updateFontSize(
           editor,
           UpdateFontSizeType.increment,
-          toolbarState.fontSizeInputValue,
+          fontSizeInputValue,
         );
       } else if (isDecreaseFontSize(event)) {
         updateFontSize(
           editor,
           UpdateFontSizeType.decrement,
-          toolbarState.fontSizeInputValue,
+          fontSizeInputValue,
         );
       } else if (isClearFormatting(event)) {
         clearFormatting(editor);
@@ -151,7 +154,7 @@ export default function ShortcutsPlugin({
     editor,
     toolbarState.isLink,
     toolbarState.blockType,
-    toolbarState.fontSizeInputValue,
+    fontSizeInputValue,
     setIsLinkEditMode,
   ]);
 

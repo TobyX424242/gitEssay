@@ -9,12 +9,30 @@ import os
 import tempfile
 
 os.environ["GITESSAY_DB"] = os.path.join(tempfile.mkdtemp(prefix="ge-test-"), "test.db")
+# Tests must never touch the developer's real OS keychain — force the DB
+# fallback path in app/secrets.py.
+os.environ["GITESSAY_DISABLE_KEYRING"] = "1"
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app import bg
 from app.db import SessionLocal
-from app.main import app
+from app.main import _startup, app
+
+# Importing app.main no longer initializes the DB (startup moved to the ASGI
+# lifespan, which TestClient only runs as a context manager). Run it once
+# here so both the `client` and the bare `db` fixtures see a seeded app.
+_startup()
+
+
+@pytest.fixture(autouse=True)
+def _quiesce_background():
+    """Wait out in-flight literature ingest/summary threads after each test:
+    the shared test DB means a previous test's background parse could still be
+    running inside the next test's monkeypatch window (flaky call counts)."""
+    yield
+    bg.wait_for_background()
 
 
 @pytest.fixture()

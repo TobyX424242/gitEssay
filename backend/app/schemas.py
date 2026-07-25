@@ -1,7 +1,7 @@
 """gitEssay backend — Pydantic request/response schemas."""
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 
 
 # ---- projects -------------------------------------------------------------
@@ -168,6 +168,12 @@ class AISettingsOut(BaseModel):
     embedding_model: str
     has_key: bool
     api_key: str = ""  # masked — empty unless a key is set
+
+    @field_serializer("api_key")
+    def _redact_api_key(self, value: str) -> str:
+        # Defense in depth: even if this model is ever constructed straight
+        # from the ORM row, the serialized payload never contains the key.
+        return ""
 
 
 class AISettingsIn(BaseModel):

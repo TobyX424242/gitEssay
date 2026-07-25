@@ -1,4 +1,5 @@
 """gitEssay backend — AI router: settings, connectivity test, LangGraph agent."""
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -100,7 +101,8 @@ async def agent_run(body: schemas.AgentRunRequest, db: Session = Depends(get_db)
       {type:'ask', question, options:[...]} — ask_user (terminal)
       {type:'done'} / {type:'error', message}
     """
-    s = _settings(db)
+    # _settings does synchronous SQLAlchemy I/O — keep it off the event loop.
+    s = await asyncio.to_thread(_settings, db)
     if not (s.base_url and s.api_key and s.model):
         raise HTTPException(
             status_code=400,

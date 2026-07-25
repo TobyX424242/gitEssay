@@ -20,7 +20,11 @@ ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
     UV_LINK_MODE=copy \
     PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
+    HF_HOME=/app/.cache/huggingface \
     HF_HUB_OFFLINE=1
+# HF_HOME under /app: the container runs as the unprivileged `app` user (see
+# USER below), so docling's model cache must live somewhere that user can
+# read — the default ~/.cache would be root's home and unreadable.
 # HF_HUB_OFFLINE=1: docling's models are pre-downloaded at build time (below),
 # so the runtime never phones HuggingFace — a blocked/slow HF endpoint would
 # otherwise fail PDF parses with RemoteProtocolError on its etag checks.
@@ -117,7 +121,15 @@ RUN HF_HUB_OFFLINE=0 HF_HUB_ETAG_TIMEOUT=30 HF_HUB_DOWNLOAD_TIMEOUT=60 \
 
 # Application source + the volume mount point for SQLite.
 COPY app ./app
-RUN mkdir -p /app/data
+
+# Run as an unprivileged user: the app holds a server-side LLM key and parses
+# untrusted PDFs, so a container escape shouldn't start from root. Everything
+# the process needs at runtime (/app tree incl. the venv + model cache, and
+# the /app/data volume mount point) is handed to `app`.
+RUN useradd --create-home app \
+    && mkdir -p /app/data \
+    && chown -R app:app /app
+USER app
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -11,7 +11,7 @@ import type {JSX} from 'react';
 
 import {calculateZoomLevel} from '@lexical/utils';
 import * as React from 'react';
-import {useRef} from 'react';
+import {useEffect, useRef} from 'react';
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -46,6 +46,23 @@ export default function ImageResizer({
   captionsEnabled: boolean;
 }): JSX.Element {
   const controlWrapperRef = useRef<HTMLDivElement>(null);
+  const attachedListenersRef = useRef<{
+    move: (event: PointerEvent) => void;
+    up: () => void;
+  } | null>(null);
+
+  // If the component unmounts mid-resize (e.g. the image node is deleted
+  // while dragging), the document-level listeners would leak permanently.
+  useEffect(() => {
+    return () => {
+      const attached = attachedListenersRef.current;
+      if (attached) {
+        document.removeEventListener('pointermove', attached.move);
+        document.removeEventListener('pointerup', attached.up);
+        attachedListenersRef.current = null;
+      }
+    };
+  }, []);
   const userSelect = useRef({
     priority: '',
     value: 'default',
@@ -171,6 +188,13 @@ export default function ImageResizer({
 
       document.addEventListener('pointermove', handlePointerMove);
       document.addEventListener('pointerup', handlePointerUp);
+      // Track the attached handler instances so an unmount mid-resize can
+      // remove exactly these (the handlers are re-created every render, so
+      // the unmount cleanup can't reference them by name).
+      attachedListenersRef.current = {
+        move: handlePointerMove,
+        up: handlePointerUp,
+      };
     }
   };
   const handlePointerMove = (event: PointerEvent) => {
@@ -250,6 +274,7 @@ export default function ImageResizer({
 
       document.removeEventListener('pointermove', handlePointerMove);
       document.removeEventListener('pointerup', handlePointerUp);
+      attachedListenersRef.current = null;
     }
   };
   return (

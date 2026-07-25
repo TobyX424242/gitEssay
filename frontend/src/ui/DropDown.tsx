@@ -24,7 +24,11 @@ import {createPortal} from 'react-dom';
 import {focusNearestDescendant, isKeyboardInput} from '../utils/focusUtils';
 
 type DropDownContextType = {
-  registerItem: (ref: React.RefObject<null | HTMLButtonElement>) => void;
+  // Returns the unregister function for the item's effect cleanup — without
+  // it, items only ever accumulate across mount/unmount cycles.
+  registerItem: (
+    ref: React.RefObject<null | HTMLButtonElement>,
+  ) => () => void;
 };
 
 const DropDownContext = React.createContext<DropDownContextType | null>(null);
@@ -54,8 +58,9 @@ export function DropDownItem({
 
   useEffect(() => {
     if (ref && ref.current) {
-      registerItem(ref);
+      return registerItem(ref);
     }
+    return undefined;
   }, [ref, registerItem]);
 
   return (
@@ -89,6 +94,9 @@ function DropDownItems({
   const registerItem = useCallback(
     (itemRef: React.RefObject<null | HTMLButtonElement>) => {
       setItems(prev => (prev ? [...prev, itemRef] : [itemRef]));
+      return () => {
+        setItems(prev => (prev ? prev.filter(r => r !== itemRef) : prev));
+      };
     },
     [setItems],
   );

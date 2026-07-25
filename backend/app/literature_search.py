@@ -21,7 +21,7 @@ from typing import Optional
 
 import httpx
 import numpy as np
-from sqlalchemy import text
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from app.db import engine
@@ -145,27 +145,27 @@ def _fts_ranking(db: Session, query: str, literature_id: Optional[str]) -> list[
 
 
 def _like_ranking(db: Session, project_id: str, query: str, literature_id: Optional[str]) -> list[str]:
-    """FTS-less fallback: substring scan, first-come order."""
+    """FTS-less fallback: substring scan, first-come order. Filtering and the
+    candidate cap are pushed into SQL so we never load the whole chunks table."""
     terms = [t.lower() for t in re.findall(r"[\w-]+", query, flags=re.UNICODE)[:6]]
     if not terms:
         return []
-    rows = (
-        db.query(LiteratureChunk)
+    q = (
+        db.query(LiteratureChunk.id)
         .join(Literature, Literature.id == LiteratureChunk.literature_id)
         .filter(Literature.project_id == project_id)
-        .order_by(LiteratureChunk.literature_id, LiteratureChunk.seq)
+    )
+    if literature_id:
+        q = q.filter(LiteratureChunk.literature_id == literature_id)
+    q = q.filter(
+        or_(*[func.lower(LiteratureChunk.text).contains(t, autoescape=True) for t in terms])
+    )
+    rows = (
+        q.order_by(LiteratureChunk.literature_id, LiteratureChunk.seq)
+        .limit(_FTS_CANDIDATES)
         .all()
     )
-    out = []
-    for row in rows:
-        if literature_id and row.literature_id != literature_id:
-            continue
-        hay = row.text.lower()
-        if any(t in hay for t in terms):
-            out.append(row.id)
-            if len(out) >= _FTS_CANDIDATES:
-                break
-    return out
+    return [r[0] for r in rows]
 
 
 def _vector_ranking(
@@ -175,17 +175,19 @@ def _vector_ranking(
     if not embedded:
         return []
     q = np.asarray(embedded[0], dtype=np.float32)
-    rows = (
+    q_rows = (
         db.query(LiteratureChunk)
         .join(Literature, Literature.id == LiteratureChunk.literature_id)
         .filter(Literature.project_id == project_id, LiteratureChunk.embedding.isnot(None))
-        .all()
     )
+    if literature_id:
+        q_rows = q_rows.filter(LiteratureChunk.literature_id == literature_id)
+    # Cosine ranking needs every candidate vector, so a SQL LIMIT is impossible
+    # without an ANN index — but scoping to one paper stays in SQL.
+    rows = q_rows.all()
     qn = np.linalg.norm(q)
     scored: list[tuple[str, float]] = []
     for row in rows:
-        if literature_id and row.literature_id != literature_id:
-            continue
         try:
             v = np.asarray(json.loads(row.embedding), dtype=np.float32)
         except Exception:  # noqa: BLE001 — skip a corrupt embedding row

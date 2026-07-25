@@ -29,6 +29,7 @@ import {
 import {useCallback} from 'react';
 
 import {$createEquationNode, EquationNode} from '../../nodes/EquationNode';
+import {b64DecodeUnicode} from '../../utils/base64';
 import KatexEquationAlterer from '../../ui/KatexEquationAlterer';
 
 type CommandPayload = {
@@ -45,7 +46,9 @@ function $convertEquationElement(el: HTMLElement) {
   if (!encoded) {
     return null;
   }
-  const equation = atob(encoded);
+  // Unicode-safe counterpart of EquationNode.exportDOM's b64EncodeUnicode
+  // (legacy ASCII-only exports decode identically).
+  const equation = b64DecodeUnicode(encoded);
   if (!equation) {
     return null;
   }

@@ -175,6 +175,11 @@ def test_low_density_skips_llm_and_goes_to_fallback(client, project, db, monkeyp
     """Scanned-PDF symptom: heuristics alone send it to OCR (no LLM call spent
     on the fast result); the fallback result IS audited once."""
     monkeypatch.setattr("app.pdf_fast.extract_fast", lambda p, f: _sparse_doc())
+    # ingest() kicks off summary generation on a background thread on success;
+    # with AI configured it would call the same (module-globally patched)
+    # call_model and race the count assertion below. The summary is not what
+    # this test asserts — disable it.
+    monkeypatch.setattr("app.literature_ingest.start_summary", lambda lid: None)
     llm_calls = []
 
     def fake_call(s, sys, user):

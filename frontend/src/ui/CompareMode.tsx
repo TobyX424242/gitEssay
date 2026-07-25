@@ -8,6 +8,7 @@
  * and the editor becomes editable again.
  */
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
+import type {SerializedEditorState} from 'lexical';
 import {
   createContext,
   type JSX,
@@ -125,11 +126,22 @@ export function CompareSurface(): JSX.Element | null {
   }, [editor, active]);
 
   // Live editor snapshot when To = "latest". Must run unconditionally (Rules
-  // of Hooks) — before the early return below.
-  const liveState = useMemo(
-    () => (toId === LATEST_ID ? editor.getEditorState().toJSON() : null),
-    [editor, toId],
+  // of Hooks) — before the early return below. Captured reactively via an
+  // update listener: a useMemo around getEditorState() is impure and only
+  // recomputes when its deps change, so the "latest" diff silently went stale.
+  const [liveState, setLiveState] = useState<SerializedEditorState | null>(
+    null,
   );
+  useEffect(() => {
+    if (toId !== LATEST_ID) {
+      setLiveState(null);
+      return undefined;
+    }
+    setLiveState(editor.getEditorState().toJSON());
+    return editor.registerUpdateListener(({editorState}) => {
+      setLiveState(editorState.toJSON());
+    });
+  }, [editor, toId]);
 
   // Trap wheel scrolling inside the compare surface (attached to the surface
   // root, which mounts only when active — a callback ref handles that).

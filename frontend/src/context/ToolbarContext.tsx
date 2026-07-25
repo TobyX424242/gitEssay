@@ -56,10 +56,8 @@ const INITIAL_TOOLBAR_STATE = {
   elementFormat: 'left' as ElementFormatType,
   fontColor: '#000',
   fontFamily: 'Arial',
-  // Current font size in px
+  // Current font size in px (the input value is derived: fontSize.slice(0, -2))
   fontSize: `${DEFAULT_FONT_SIZE}px`,
-  // Font size input value - for controlled input
-  fontSizeInputValue: `${DEFAULT_FONT_SIZE}`,
   isBold: false,
   isCode: false,
   isHighlight: false,
@@ -100,7 +98,6 @@ export const ToolbarContext = ({
   children: ReactNode;
 }): JSX.Element => {
   const [toolbarState, setToolbarState] = useState(INITIAL_TOOLBAR_STATE);
-  const selectionFontSize = toolbarState.fontSize;
 
   const updateToolbarState = useCallback(
     <Key extends ToolbarStateKey>(key: Key, value: ToolbarStateValue<Key>) => {
@@ -111,11 +108,6 @@ export const ToolbarContext = ({
     },
     [],
   );
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    updateToolbarState('fontSizeInputValue', selectionFontSize.slice(0, -2));
-  }, [selectionFontSize, updateToolbarState]);
 
   const contextValue = useMemo(() => {
     return {

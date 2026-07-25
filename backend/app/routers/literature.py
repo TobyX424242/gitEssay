@@ -14,6 +14,7 @@ import shutil
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import schemas
@@ -34,12 +35,32 @@ from app.storage import abs_path, literature_dir
 
 router = APIRouter(tags=["literature"])
 
+_ALLOWED_CONTENT_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/octet-stream",  # generic binary — some browsers send this
+}
+
 
 def _note_count(db: Session, literature_id: str) -> int:
     return db.query(Memory).filter_by(literature_id=literature_id).count()
 
 
-def _to_out(db: Session, lit: Literature) -> dict:
+def _note_counts(db: Session, literature_ids: list[str]) -> dict[str, int]:
+    """Batch note counts for a list page — one GROUP BY query instead of one
+    COUNT per row (N+1)."""
+    if not literature_ids:
+        return {}
+    rows = (
+        db.query(Memory.literature_id, func.count(Memory.id))
+        .filter(Memory.literature_id.in_(literature_ids))
+        .group_by(Memory.literature_id)
+        .all()
+    )
+    return {lid: n for lid, n in rows}
+
+
+def _to_out(db: Session, lit: Literature, note_count: int | None = None) -> dict:
     return {
         "id": lit.id,
         "project_id": lit.project_id,
@@ -51,7 +72,7 @@ def _to_out(db: Session, lit: Literature) -> dict:
         "char_count": lit.char_count,
         "chunk_count": lit.chunk_count,
         "image_count": lit.image_count,
-        "note_count": _note_count(db, lit.id),
+        "note_count": _note_count(db, lit.id) if note_count is None else note_count,
         "summary_status": lit.summary_status or "none",
         "embed_status": lit.embed_status or "none",
         "progress": lit.progress,
@@ -80,6 +101,14 @@ def upload_literature(
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=415, detail=f"unsupported file type {ext or '(none)'} — PDF or DOCX only"
+        )
+    # Content-type whitelist (defense in depth alongside the extension gate).
+    # Some browsers send application/octet-stream or an empty type for DOCX,
+    # so those stay allowed; anything explicitly wrong is rejected.
+    ct = (file.content_type or "").lower()
+    if ct and ct not in _ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=415, detail=f"unexpected content-type {ct} — PDF or DOCX only"
         )
     data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
@@ -115,7 +144,8 @@ def list_literature(pid: str, db: Session = Depends(get_db)):
         .order_by(Literature.created_at.desc())
         .all()
     )
-    return [_to_out(db, lit) for lit in rows]
+    counts = _note_counts(db, [lit.id for lit in rows])
+    return [_to_out(db, lit, counts.get(lit.id, 0)) for lit in rows]
 
 
 @router.get("/literature/{lid}", response_model=schemas.LiteratureDetail)

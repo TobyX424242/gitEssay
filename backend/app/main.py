@@ -6,6 +6,7 @@ import glob
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -169,14 +170,42 @@ def _sweep_orphan_literature_dirs() -> None:
         log.info("swept %d orphan literature dirs", len(removed))
 
 
-Base.metadata.create_all(bind=engine)
-_migrate()
-ensure_fts_table()
-_seed()
-_resume_interrupted()
-_sweep_orphan_literature_dirs()
+def _migrate_api_key_to_keychain() -> None:
+    """Move a pre-existing plaintext DB API key into the OS keychain (one-shot
+    upgrade for DBs written before keychain storage). When no keychain is
+    available the setter keeps the DB value, so this is a safe no-op there."""
+    db = SessionLocal()
+    try:
+        s = db.get(AISettings, 1)
+        if s is not None and s._api_key:  # noqa: SLF001 — raw column, not the property
+            s.api_key = s._api_key  # noqa: SLF001 — routes through the keychain setter
+            db.commit()
+            if not s._api_key:  # noqa: SLF001
+                log.info("migrated LLM API key from SQLite into the OS keychain")
+    finally:
+        db.close()
 
-app = FastAPI(title="gitEssay backend")
+
+def _startup() -> None:
+    """All DB/filesystem initialization. Runs from the ASGI lifespan (uvicorn,
+    desktop) — NOT at import time, so `import app.main` stays side-effect free
+    (tests call this explicitly from conftest)."""
+    Base.metadata.create_all(bind=engine)
+    _migrate()
+    ensure_fts_table()
+    _seed()
+    _migrate_api_key_to_keychain()
+    _resume_interrupted()
+    _sweep_orphan_literature_dirs()
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    _startup()
+    yield
+
+
+app = FastAPI(title="gitEssay backend", lifespan=_lifespan)
 # Single-user local app with no auth and a server-side LLM key: an open CORS
 # policy would let ANY website the user visits drive this backend (read data,
 # burn LLM quota). In practice the browser never needs CORS at all — the Vite
