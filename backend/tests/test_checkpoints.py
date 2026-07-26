@@ -119,3 +119,33 @@ def test_restore_rejects_cross_project_checkpoint(client, project):
 def test_capture_on_missing_project_is_404(client):
     r = client.post("/api/projects/nope/checkpoints", json={"state": state(1)})
     assert r.status_code == 404
+
+
+def test_list_checkpoints_omits_state(client, project):
+    """The list endpoint is metadata-only (states can be huge); state is
+    fetched per-checkpoint via GET /checkpoints/{cid}."""
+    pid = project["id"]
+    capture(client, pid, 1, source="manual")
+    cps = list_cps(client, pid)
+    assert len(cps) == 2
+    assert all("state" not in c for c in cps)
+
+
+def test_get_checkpoint_returns_full_state(client, project):
+    pid = project["id"]
+    m = capture(client, pid, 7, source="manual", label="v7")
+    r = client.get(f"/api/projects/{pid}/checkpoints/{m['id']}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == state(7)
+    assert body["label"] == "v7"
+
+
+def test_get_checkpoint_rejects_cross_project_and_missing(client, project):
+    pid = project["id"]
+    other = client.post("/api/projects", json={"name": "Other"}).json()
+    foreign = list_cps(client, other["id"])[0]
+    r = client.get(f"/api/projects/{pid}/checkpoints/{foreign['id']}")
+    assert r.status_code == 404
+    r = client.get(f"/api/projects/{pid}/checkpoints/nope")
+    assert r.status_code == 404

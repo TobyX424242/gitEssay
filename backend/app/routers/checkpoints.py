@@ -29,6 +29,18 @@ router = APIRouter(tags=["checkpoints"])
 MAX_DURABLE_CHECKPOINTS = int(os.environ.get("GE_MAX_DURABLE_CHECKPOINTS", "100"))
 
 
+def to_meta(cp: Checkpoint) -> dict:
+    """List view: metadata only, no state parse (keeps the list endpoint O(rows))."""
+    return {
+        "id": cp.id,
+        "project_id": cp.project_id,
+        "parent_id": cp.parent_id,
+        "source": cp.source,
+        "label": cp.label,
+        "created_at": cp.created_at,
+    }
+
+
 def to_out(cp: Checkpoint) -> dict:
     return {
         "id": cp.id,
@@ -74,7 +86,7 @@ def _enforce_retention(db: Session, pid: str, current_id: Optional[str]) -> None
         excess -= 1
 
 
-@router.get("/projects/{pid}/checkpoints", response_model=list[schemas.CheckpointOut])
+@router.get("/projects/{pid}/checkpoints", response_model=list[schemas.CheckpointMeta])
 def list_checkpoints(pid: str, db: Session = Depends(get_db)):
     get_project_or_404(db, pid)
     rows = (
@@ -83,7 +95,16 @@ def list_checkpoints(pid: str, db: Session = Depends(get_db)):
         .order_by(Checkpoint.created_at.desc(), Checkpoint.id.desc())
         .all()
     )
-    return [to_out(c) for c in rows]
+    return [to_meta(c) for c in rows]
+
+
+@router.get("/projects/{pid}/checkpoints/{cid}", response_model=schemas.CheckpointOut)
+def get_checkpoint(pid: str, cid: str, db: Session = Depends(get_db)):
+    get_project_or_404(db, pid)
+    cp = db.get(Checkpoint, cid)
+    if cp is None or cp.project_id != pid:
+        raise HTTPException(status_code=404, detail="checkpoint not found")
+    return to_out(cp)
 
 
 @router.get("/projects/{pid}/current", response_model=Optional[schemas.CheckpointOut])

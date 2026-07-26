@@ -6,6 +6,7 @@ import glob
 import json
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -195,13 +196,18 @@ def _startup() -> None:
     ensure_fts_table()
     _seed()
     _migrate_api_key_to_keychain()
-    _resume_interrupted()
     _sweep_orphan_literature_dirs()
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     _startup()
+    # Defer resuming interrupted literature work: the first ingest import pulls
+    # in docling+torch (a 10-30s CPU/disk spike) that would otherwise fight the
+    # desktop webview's first page load. Daemon timer so shutdown isn't blocked.
+    resume_timer = threading.Timer(5.0, _resume_interrupted)
+    resume_timer.daemon = True
+    resume_timer.start()
     yield
 
 

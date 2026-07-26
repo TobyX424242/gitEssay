@@ -48,8 +48,8 @@ sidecar as-is.
 
 | File | Role |
 |---|---|
-| `backend/app/desktop.py` | Desktop entry point: resolve the per-user data dir → set env vars → start uvicorn (free port, asyncio/h11 to avoid frozen-build hidden imports) → open webview/browser. `--server-only` runs headless (tests/CI smoke); `--port N` pins the port |
-| `backend/app/main.py` | ① Serves the frontend same-origin when `GITESSAY_FRONTEND_BUILD` is set (mounted after the `/api` routers; the docker path is unaffected); ② auto-resumes interrupted literature parses/summaries at startup (with a crash-loop guard) and sweeps orphan literature dirs |
+| `backend/app/desktop.py` | Desktop entry point: resolve the per-user data dir → set env vars → start uvicorn (free port, asyncio/h11 to avoid frozen-build hidden imports) → open the webview IMMEDIATELY on an inline loading page, then jump to the app once the port answers (browser fallback waits first). `--server-only` runs headless (tests/CI smoke); `--port N` pins the port |
+| `backend/app/main.py` | ① Serves the frontend same-origin when `GITESSAY_FRONTEND_BUILD` is set (mounted after the `/api` routers; the docker path is unaffected); ② auto-resumes interrupted literature parses/summaries at startup (with a crash-loop guard; deferred ~5s via a daemon timer so the docling/torch import spike doesn't fight the first page load) and sweeps orphan literature dirs |
 | `backend/desktop_main.py` + `backend/desktop.spec` | PyInstaller entry and packaging config (onedir, `collect_all(docling…, rapidocr)`, `strip=True`, torch test/bin payload dropped, no UPX to reduce antivirus false positives) |
 | `backend/pyproject.toml` | `desktop` dependency group (platformdirs / pywebview / pyinstaller) — `uv sync --group desktop` |
 | `scripts/build_desktop.py` | The single build entry point for local AND CI: frontend build → deps → PyInstaller → smoke test → versioned archive + SHA256 |

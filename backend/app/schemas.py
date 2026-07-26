@@ -25,16 +25,22 @@ class ProjectRename(BaseModel):
 
 
 # ---- checkpoints ----------------------------------------------------------
-class CheckpointOut(BaseModel):
+class CheckpointMeta(BaseModel):
+    """List-view of a checkpoint: everything except the (potentially huge)
+    serialized editor state. Keeps the list endpoint O(rows), not O(rows x doc)."""
+
     id: str
     project_id: str
     parent_id: Optional[str] = None
-    state: dict[str, Any]
     source: str
     label: Optional[str] = None
     created_at: int
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CheckpointOut(CheckpointMeta):
+    state: dict[str, Any]
 
 
 class CheckpointCapture(BaseModel):

@@ -9,7 +9,7 @@ import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {type JSX, useState} from 'react';
 
 import {useCheckpoints} from '../checkpoints/useCheckpoints';
-import type {Checkpoint} from '../checkpoints/types';
+import type {CheckpointMeta} from '../checkpoints/types';
 import {LATEST_ID, useCompareMode} from './CompareMode';
 import './CheckpointsPanel.css';
 
@@ -17,7 +17,7 @@ type SourceFilter = 'all' | 'manual' | 'ai';
 
 /** Display name + badge modifier + no-label fallback title per source. */
 const SOURCE_META: Record<
-  Checkpoint['source'],
+  CheckpointMeta['source'],
   {badge: string; cls: string; untitled: string}
 > = {
   init: {badge: 'Initial', cls: 'init', untitled: 'Initial version'},
@@ -112,7 +112,7 @@ export default function CheckpointsList({
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [filter, setFilter] = useState<SourceFilter>('all');
 
-  const matchesQuery = (cp: Checkpoint): boolean => {
+  const matchesQuery = (cp: CheckpointMeta): boolean => {
     const q = query.trim();
     if (!q) {
       return true;
@@ -122,7 +122,7 @@ export default function CheckpointsList({
       ? hay.includes(q)
       : hay.toLowerCase().includes(q.toLowerCase());
   };
-  const matchesFilter = (cp: Checkpoint): boolean => {
+  const matchesFilter = (cp: CheckpointMeta): boolean => {
     if (filter === 'manual') {
       return cp.source === 'manual';
     }

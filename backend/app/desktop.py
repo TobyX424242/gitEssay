@@ -91,6 +91,32 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+# Inline first-paint pages for the desktop window (zero external deps — the
+# whole point is that they render instantly while the server is still booting).
+_LOADING_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><title>gitEssay</title>
+<style>
+  html,body{height:100%;margin:0}
+  body{display:flex;flex-direction:column;align-items:center;justify-content:center;
+       gap:16px;background:#1e1e24;color:#e8e8ec;
+       font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+  .spin{width:36px;height:36px;border-radius:50%;border:3px solid #444;
+        border-top-color:#7aa2ff;animation:r .8s linear infinite}
+  @keyframes r{to{transform:rotate(360deg)}}
+  p{margin:0;font-size:14px;color:#9a9aa5}
+</style></head>
+<body><div class="spin"></div><p>Starting gitEssay&hellip;</p></body></html>"""
+
+_FAILED_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><title>gitEssay</title>
+<style>
+  html,body{height:100%;margin:0}
+  body{display:flex;align-items:center;justify-content:center;background:#1e1e24;
+       color:#e8e8ec;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+</style></head>
+<body><p>gitEssay failed to start its local server. Please restart the app.</p></body></html>"""
+
+
 def _wait_until_up(port: int, timeout: float = 15.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -125,17 +151,35 @@ def _start_server(port: int) -> None:
     threading.Thread(target=uvicorn.Server(config).run, daemon=True).start()
 
 
-def _open_window(url: str) -> None:
+def _open_window(url: str, port: int) -> None:
     """Native webview window; fall back to the system browser (headless Linux,
-    missing GTK/Qt). Either way this blocks until shutdown."""
+    missing GTK/Qt). Either way this blocks until shutdown.
+
+    The window opens IMMEDIATELY on an inline loading page — importing the
+    server (langchain/numpy/…) can take many seconds on Windows, and showing
+    nothing the whole time reads as "the app didn't launch". Once the port
+    answers, the window jumps to the real app."""
     try:
         import webview
 
-        webview.create_window("gitEssay", url, width=1440, height=900, min_size=(900, 600))
+        window = webview.create_window(
+            "gitEssay", html=_LOADING_HTML, width=1440, height=900, min_size=(900, 600)
+        )
+
+        def _jump_when_ready() -> None:
+            if _wait_until_up(port, timeout=60.0):
+                window.load_url(url)
+            else:
+                window.load_html(_FAILED_HTML)
+
+        threading.Thread(target=_jump_when_ready, daemon=True).start()
         webview.start()
         return
     except Exception as exc:  # noqa: BLE001 — any GUI failure → browser
         _log(f"[gitessay] webview unavailable ({exc}); opening browser instead.")
+    if not _wait_until_up(port):
+        _log("[gitessay] server failed to start")
+        sys.exit(1)
     webbrowser.open(url)
     try:
         threading.Event().wait()  # block until Ctrl+C
@@ -155,21 +199,21 @@ def main() -> None:
     port = int(port_arg) if port_arg else _free_port()
     _start_server(port)
     url = f"http://127.0.0.1:{port}/"
-    if not _wait_until_up(port):
-        _log("[gitessay] server failed to start")
-        sys.exit(1)
 
     _log(f"[gitessay] data:     {data_dir}")
     _log(f"[gitessay] frontend: {frontend or '(API only — no build found)'}")
     _log(f"[gitessay] serving:  {url}")
 
     if "--server-only" in sys.argv:
+        if not _wait_until_up(port):
+            _log("[gitessay] server failed to start")
+            sys.exit(1)
         try:
             threading.Event().wait()
         except KeyboardInterrupt:
             pass
         return
-    _open_window(url)
+    _open_window(url, port)
 
 
 if __name__ == "__main__":

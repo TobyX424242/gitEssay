@@ -23,3 +23,8 @@ export interface Checkpoint {
   label?: string;
   source: CheckpointSource;
 }
+
+/** List view of a checkpoint: metadata only. The (potentially huge) editor
+ * state is fetched per-checkpoint via fetchCheckpoint when actually needed
+ * (compare mode), keeping list refreshes after every auto-save cheap. */
+export type CheckpointMeta = Omit<Checkpoint, 'state'>;

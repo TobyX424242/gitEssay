@@ -15,9 +15,9 @@ import {
 import {getActiveProjectId} from '../projects/projectStore';
 import {api} from '../utils/api';
 import {createVersionedStore} from '../utils/store';
-import type {Checkpoint, CheckpointSource} from './types';
+import type {Checkpoint, CheckpointMeta, CheckpointSource} from './types';
 
-export type {Checkpoint, CheckpointSource} from './types';
+export type {Checkpoint, CheckpointMeta, CheckpointSource} from './types';
 
 // --- pub/sub (shared primitive, see utils/store.ts) --------------------------
 const store = createVersionedStore();
@@ -25,34 +25,54 @@ const emit = store.emit;
 export const subscribe = store.subscribe;
 export const getVersion = store.getVersion;
 
-interface ApiCheckpoint {
+interface ApiCheckpointMeta {
   id: string;
   project_id: string;
   parent_id: string | null;
-  state: SerializedEditorState;
   source: CheckpointSource;
   label: string | null;
   created_at: number;
 }
 
-function map(c: ApiCheckpoint): Checkpoint {
+interface ApiCheckpoint extends ApiCheckpointMeta {
+  state: SerializedEditorState;
+}
+
+function mapMeta(c: ApiCheckpointMeta): CheckpointMeta {
   return {
     id: c.id,
     projectId: c.project_id,
     parentId: c.parent_id,
-    state: c.state,
     source: c.source,
     label: c.label ?? undefined,
     createdAt: c.created_at,
   };
 }
 
+function map(c: ApiCheckpoint): Checkpoint {
+  return {...mapMeta(c), state: c.state};
+}
+
 // --- reads -----------------------------------------------------------------
-export async function listCheckpoints(projectId: string): Promise<Checkpoint[]> {
-  const rows = await api.get<ApiCheckpoint[]>(
+export async function listCheckpoints(
+  projectId: string,
+): Promise<CheckpointMeta[]> {
+  const rows = await api.get<ApiCheckpointMeta[]>(
     `/projects/${projectId}/checkpoints`,
   );
-  return rows.map(map);
+  return rows.map(mapMeta);
+}
+
+/** Fetch one checkpoint WITH its editor state (compare mode). The list
+ * endpoint deliberately omits states, so callers fetch them on demand. */
+export async function fetchCheckpoint(
+  projectId: string,
+  id: string,
+): Promise<Checkpoint> {
+  const c = await api.get<ApiCheckpoint>(
+    `/projects/${projectId}/checkpoints/${id}`,
+  );
+  return map(c);
 }
 
 export async function getCurrentId(projectId: string): Promise<string | null> {

@@ -19,10 +19,12 @@ import {
   useState,
 } from 'react';
 
+import {fetchCheckpoint} from '../checkpoints/service';
 import {useCheckpoints} from '../checkpoints/useCheckpoints';
 import {diffBlocks} from '../diff/diff';
 import DiffView from '../diff/DiffView';
 import {tokenizeBlocks} from '../diff/tokenize';
+import {useActiveProjectId} from '../projects/projectStore';
 import {useScrollTrap} from './useScrollTrap';
 
 interface CompareModeValue {
@@ -147,6 +149,45 @@ export function CompareSurface(): JSX.Element | null {
   // root, which mounts only when active — a callback ref handles that).
   const trapRef = useScrollTrap();
 
+  // Checkpoint states are no longer part of the list payload (the list stays
+  // metadata-only so auto-save refreshes are cheap). Fetch the From/To states
+  // on demand, cached per id, while compare mode is active.
+  const activeProjectId = useActiveProjectId();
+  const [fetchedStates, setFetchedStates] = useState<
+    Record<string, SerializedEditorState>
+  >({});
+  useEffect(() => {
+    if (!active || !activeProjectId) {
+      return;
+    }
+    const ids = [fromId, toId].filter(
+      (id): id is string =>
+        id !== null && id !== LATEST_ID && !(id in fetchedStates),
+    );
+    if (ids.length === 0) {
+      return;
+    }
+    let alive = true;
+    Promise.all(
+      ids.map(id =>
+        fetchCheckpoint(activeProjectId, id).then(cp => [id, cp.state] as const),
+      ),
+    ).then(entries => {
+      if (alive) {
+        setFetchedStates(prev => {
+          const next = {...prev};
+          for (const [id, st] of entries) {
+            next[id] = st;
+          }
+          return next;
+        });
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [active, activeProjectId, fromId, toId, fetchedStates]);
+
   if (!active || fromId === null || toId === null) {
     return null;
   }
@@ -176,11 +217,12 @@ export function CompareSurface(): JSX.Element | null {
     return ni >= 0 && ni < arr.length ? arr[ni].id : null;
   };
 
-  const fromCp = cpTimeline.find(c => c.id === fromId);
-  const toState = toId === LATEST_ID ? liveState : cpTimeline.find(c => c.id === toId)?.state;
+  const fromState = fetchedStates[fromId] ?? null;
+  const toState =
+    toId === LATEST_ID ? liveState : (fetchedStates[toId] ?? null);
   const ops =
-    fromCp && fromCp.state && toState
-      ? diffBlocks(tokenizeBlocks(fromCp.state), tokenizeBlocks(toState))
+    fromState && toState
+      ? diffBlocks(tokenizeBlocks(fromState), tokenizeBlocks(toState))
       : [];
   const changed = ops.filter(o => o.type !== 'equal').length;
 

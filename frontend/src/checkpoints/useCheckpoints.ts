@@ -7,7 +7,7 @@ import {type LexicalEditor} from 'lexical';
 import {useCallback, useEffect, useState, useSyncExternalStore} from 'react';
 
 import {useActiveProjectId} from '../projects/projectStore';
-import type {Checkpoint} from './types';
+import type {CheckpointMeta} from './types';
 import {
   captureCheckpoint,
   getCurrentId,
@@ -18,7 +18,7 @@ import {
 } from './service';
 
 interface CheckpointsData {
-  checkpoints: Checkpoint[];
+  checkpoints: CheckpointMeta[];
   currentId: string | null;
 }
 
