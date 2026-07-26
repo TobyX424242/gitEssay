@@ -1,11 +1,13 @@
 """gitEssay backend — projects router."""
 import json
+import re
 import shutil
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from app import schemas
+from app import project_transfer, schemas
 from app.db import get_db
 from app.deps import get_project_or_404
 from app.literature_search import delete_literature_fts
@@ -58,6 +60,34 @@ def create_project(body: schemas.ProjectCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(project)
     return project
+
+
+# NOTE: /projects/import and /projects/{pid}/export-style static segments
+# must be declared BEFORE /projects/{pid} so FastAPI doesn't capture them as
+# a project id.
+@router.post("/projects/import", response_model=schemas.ProjectOut)
+def import_project_archive(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Restore a project archive (.zip from /projects/{pid}/export) as a NEW
+    project. Duplicate names are de-duplicated OS-style: Name, Name (2), ..."""
+    data = file.file.read(project_transfer.MAX_ARCHIVE_BYTES + 1)
+    try:
+        return project_transfer.import_archive(db, data)
+    except project_transfer.ArchiveError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/projects/{pid}/export")
+def export_project_archive(pid: str, db: Session = Depends(get_db)):
+    """Download the full project as a .zip archive (essay + checkpoints + AI
+    chat history + memories + literature originals/summaries/chunks/images)."""
+    project = get_project_or_404(db, pid)
+    data = project_transfer.build_export_zip(db, project)
+    safe = re.sub(r'[^\w\-. ()]+', '_', project.name).strip() or "project"
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe}.zip"'},
+    )
 
 
 @router.get("/projects/{pid}", response_model=schemas.ProjectOut)

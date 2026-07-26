@@ -69,6 +69,21 @@ export async function createProject(name?: string): Promise<Project> {
   return p;
 }
 
+/** Restore a project archive (.zip) as a NEW project and make it active.
+ * The backend de-duplicates the archived name OS-style (Name, Name (2), ...). */
+export async function importProjectArchive(file: File): Promise<Project> {
+  const form = new FormData();
+  form.append('file', file);
+  const p = await api.postForm<Project>('/projects/import', form);
+  projects = [p, ...projects];
+  activeId = p.id;
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(LS_KEY, p.id);
+  }
+  emit();
+  return p;
+}
+
 export async function renameProject(id: string, name: string): Promise<void> {
   const p = await api.patch<Project>(`/projects/${id}`, {name});
   projects = projects.map(x => (x.id === id ? p : x));
