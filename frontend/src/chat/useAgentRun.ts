@@ -7,6 +7,13 @@
  * ask, or finish. A patch is validated against the document snapshot and
  * re-prompted on a mis-copy or unparseable LaTeX (each bounded independently);
  * a stale or structurally invalid patch is marked failed instead.
+ *
+ * Runs are keyed BY CONVERSATION. Switching conversations never interrupts a
+ * run: it keeps streaming in the background, persists to its own conversation
+ * when done, and the live bubble reappears when you switch back. `loading` is
+ * per-conversation too, so another conversation's composer stays usable while
+ * a run streams. A PROJECT switch cancels every run (cancelAll) — the document
+ * is swapped out, so patch validation would target the wrong doc.
  */
 import type {LexicalEditor} from 'lexical';
 import {useCallback, useRef, useState} from 'react';
@@ -36,31 +43,51 @@ export interface StartRunArgs {
 }
 
 export interface AgentRun {
+  /** Live bubble of the ACTIVE conversation's run (null when it has none). */
   streaming: ChatMessage | null;
+  /** True while the ACTIVE conversation has a run in flight. */
   loading: boolean;
   /** The message id kept in view during/after a retry (its target), so the live
    *  stream and the finalized patch card don't get scrolled off to the bottom.
    *  Set on a retry, cleared on a fresh send or a conversation switch. */
   pinnedIdRef: React.MutableRefObject<string | null>;
   startRun: (args: StartRunArgs) => void;
+  /** Abort the ACTIVE conversation's run (the Stop button). The partial
+   *  message still persists to its conversation via the normal finalize path. */
   stop: () => void;
+  /** Abort EVERY in-flight run and drop all live state immediately (project
+   *  switch). Aborted runs still persist their partial messages to their own
+   *  conversations — only the UI moves on. */
+  cancelAll: () => void;
+}
+
+/** Live state of one conversation's in-flight run. */
+interface RunEntry {
+  message: ChatMessage;
+  controller: AbortController;
 }
 
 export function useAgentRun({
   editor,
   configured,
   activeProjectId,
+  activeConvId,
   memoryEnabled,
 }: {
   editor: LexicalEditor;
   configured: boolean;
   activeProjectId: string | null;
+  activeConvId: string | null;
   memoryEnabled: boolean;
 }): AgentRun {
-  const [streaming, setStreaming] = useState<ChatMessage | null>(null);
-  const [loading, setLoading] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
+  const [runs, setRuns] = useState<Record<string, RunEntry>>({});
   const pinnedIdRef = useRef<string | null>(null);
+  // Mirrors for the stable callbacks (stop/cancelAll) so they always see the
+  // latest runs + active conversation without re-creating.
+  const runsRef = useRef(runs);
+  runsRef.current = runs;
+  const activeConvIdRef = useRef(activeConvId);
+  activeConvIdRef.current = activeConvId;
 
   /**
    * Shared run path for send + retry. `replace` swaps an existing assistant
@@ -84,20 +111,35 @@ export function useAgentRun({
         return;
       }
       const controller = new AbortController();
-      abortRef.current = controller;
       // Pin a retry's target into view (live stream + finalized patch card); a
       // fresh send has no pin, so it scrolls to the bottom as usual.
       pinnedIdRef.current = args.replace ? args.streamingId : null;
-      setLoading(true);
-      setStreaming({
-        id: args.streamingId,
-        role: 'assistant',
-        text: '',
-        mode: args.mode,
-        streaming: true,
-        steps: [],
-        action: null,
-      });
+      setRuns(rs => ({
+        ...rs,
+        [args.convId]: {
+          controller,
+          message: {
+            id: args.streamingId,
+            role: 'assistant',
+            text: '',
+            mode: args.mode,
+            streaming: true,
+            steps: [],
+            action: null,
+          },
+        },
+      }));
+      // Merge into THIS run's bubble only — a stale update (entry replaced by
+      // a newer run in the same conversation, or the run already finished)
+      // is dropped, never clobbers another conversation's bubble.
+      const patchRun = (fn: (m: ChatMessage) => ChatMessage) =>
+        setRuns(rs => {
+          const r = rs[args.convId];
+          if (!r || r.controller !== controller || r.message.id !== args.streamingId) {
+            return rs;
+          }
+          return {...rs, [args.convId]: {...r, message: fn(r.message)}};
+        });
 
       const history = messagesToHistory(args.priorMessages);
       // Snapshot of the document the AI is given for THIS run. Recorded per turn
@@ -105,28 +147,31 @@ export function useAgentRun({
       // classified: mis-copy (search never in the snapshot) vs stale (search was
       // in the snapshot but the live doc changed).
       const snapshot = docParagraphs(editor).join('\n\n');
-      const runOptsBase = {
-        editor,
-        mode: args.mode,
-        selectionText: args.selectionText,
-        signal: controller.signal,
-        // Long-term memory is owned by the backend (it runs the remember tool);
-        // the frontend only forwards the on/off toggle.
-        memoryEnabled,
-        onUpdate: (patch: Partial<ChatMessage>) =>
-          setStreaming(s => (s && s.id === args.streamingId ? {...s, ...patch} : s)),
-      };
       // One engine run with a given history + instruction — used for the first
       // attempt and each mis-copy retry. Resets the streaming bubble each time so
       // the retry streams cleanly into the same slot.
       const runOnce = (h: ChatTurn[], instr: string): Promise<ChatMessage> => {
-        setStreaming(s =>
-          s && s.id === args.streamingId
-            ? {...s, text: '', thinking: undefined, steps: [], action: null, edits: undefined}
-            : s,
-        );
-        const opts = {...runOptsBase, history: h, instruction: instr};
-        return runAgentGraph({...opts, projectId: activeProjectId ?? ''});
+        patchRun(m => ({
+          ...m,
+          text: '',
+          thinking: undefined,
+          steps: [],
+          action: null,
+          edits: undefined,
+        }));
+        return runAgentGraph({
+          editor,
+          mode: args.mode,
+          selectionText: args.selectionText,
+          signal: controller.signal,
+          // Long-term memory is owned by the backend (it runs the remember
+          // tool); the frontend only forwards the on/off toggle.
+          memoryEnabled,
+          history: h,
+          instruction: instr,
+          onUpdate: (patch: Partial<ChatMessage>) => patchRun(m => ({...m, ...patch})),
+          projectId: activeProjectId ?? '',
+        });
       };
 
       // Multi-layer fallback: validate the patch the AI produced; re-prompt on a
@@ -244,7 +289,8 @@ export function useAgentRun({
           // Await the persist so the store holds the new message BEFORE we drop
           // the live streaming bubble — otherwise the non-optimistic refetch
           // leaves the OLD (pre-retry) message visible for a frame (a flicker)
-          // on an in-place retry.
+          // on an in-place retry. Targets args.convId, so a background run
+          // lands in its OWN conversation even if the user is elsewhere.
           if (args.replace) {
             await replaceMessage(args.convId, args.streamingId, persisted);
           } else {
@@ -267,17 +313,41 @@ export function useAgentRun({
           }
         })
         .finally(() => {
-          setLoading(false);
-          setStreaming(null);
-          abortRef.current = null;
+          // Drop this run's entry — but only if it is still THIS run (a newer
+          // run may have taken the conversation's slot while this one settled).
+          setRuns(rs => {
+            const r = rs[args.convId];
+            if (!r || r.controller !== controller) {
+              return rs;
+            }
+            const next = {...rs};
+            delete next[args.convId];
+            return next;
+          });
         });
     },
     [activeProjectId, configured, editor, memoryEnabled],
   );
 
   const stop = useCallback(() => {
-    abortRef.current?.abort();
+    const id = activeConvIdRef.current;
+    if (id) {
+      runsRef.current[id]?.controller.abort();
+    }
   }, []);
 
-  return {streaming, loading, pinnedIdRef, startRun, stop};
+  const cancelAll = useCallback(() => {
+    Object.values(runsRef.current).forEach(r => r.controller.abort());
+    setRuns({});
+  }, []);
+
+  const activeRun = activeConvId ? runs[activeConvId] : undefined;
+  return {
+    streaming: activeRun?.message ?? null,
+    loading: !!activeRun,
+    pinnedIdRef,
+    startRun,
+    stop,
+    cancelAll,
+  };
 }

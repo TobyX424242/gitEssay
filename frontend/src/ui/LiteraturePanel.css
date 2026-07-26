@@ -443,6 +443,15 @@
 [data-theme='dark'] .lit-badge--conf-reliable {
   color: #9fe6b8;
 }
+/* Processing badges (parsing… / evaluating… / summarizing…) pulse, so they
+   need extra dark-mode help: a light-amber text on the translucent amber
+   bubble (the light-mode #7a4d00 is unreadable on the dark surface), and a
+   shallower pulse floor — dipping the whole badge to 0.45 opacity crushes
+   the contrast far below the light-mode equivalent. */
+[data-theme='dark'] .lit-badge--processing {
+  color: #ffd58a;
+  animation: lit-pulse-dark 1.2s ease-in-out infinite;
+}
 [data-theme='dark'] .lit-badge--conf-partial {
   color: #ffd58a;
 }
@@ -453,6 +462,12 @@
 @keyframes lit-pulse {
   50% {
     opacity: 0.45;
+  }
+}
+/* Dark-mode pulse: same rhythm, higher floor (see .lit-badge--processing). */
+@keyframes lit-pulse-dark {
+  50% {
+    opacity: 0.72;
   }
 }
 

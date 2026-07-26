@@ -76,10 +76,11 @@ export default function ChatSidebar(): JSX.Element {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const trapRef = useScrollTrap();
 
-  const {streaming, loading, pinnedIdRef, startRun, stop} = useAgentRun({
+  const {streaming, loading, pinnedIdRef, startRun, stop, cancelAll} = useAgentRun({
     editor,
     configured,
     activeProjectId,
+    activeConvId: active?.id ?? null,
     memoryEnabled,
   });
   const {
@@ -167,13 +168,21 @@ export default function ChatSidebar(): JSX.Element {
   // fresh send has a brand-new id and renders at the end as usual.
   const streamingInPlace = !!streaming && messages.some(m => m.id === streaming.id);
 
-  // Clear the pin AND any pending retry plan when switching conversations so a
-  // stale target doesn't pin and a stale plan doesn't revert/persist against the
-  // wrong conversation.
+  // Switching conversations does NOT cancel a run: it keeps streaming in the
+  // background, persists to its own conversation, and its bubble reappears
+  // when you switch back. Only the retry pin/plan is per-conversation UI
+  // state, so those are cleared so a stale target doesn't pin and a stale
+  // plan doesn't revert/persist against the wrong conversation.
   useEffect(() => {
     pinnedIdRef.current = null;
     cancelRetry();
   }, [active?.id, cancelRetry, pinnedIdRef]);
+
+  // A project switch swaps the whole document + conversation set — in-flight
+  // runs would validate their patches against the WRONG doc, so cancel all.
+  useEffect(() => {
+    cancelAll();
+  }, [activeProjectId, cancelAll]);
 
   // Keep the newest content in view. A fresh send scrolls to the bottom; a retry
   // pins its target so the live stream AND the finalized patch card stay visible
