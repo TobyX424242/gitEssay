@@ -44,8 +44,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      # nginx:alpine ships busybox wget.
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/"]
+      # nginx:alpine ships busybox wget. Use 127.0.0.1, not localhost — busybox
+      # wget resolves localhost to ::1 first, but nginx only listens on IPv4,
+      # so the check would flap the container to "unhealthy" while it serves fine.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 30s
       timeout: 5s
       retries: 3
