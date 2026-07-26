@@ -1,4 +1,5 @@
-/* gitEssay — project switcher (app bar). Mirrors the chat conversation switcher. */
+/* gitEssay — project switcher (app bar). The bar button opens a modal window
+   (useModal chrome) listing the projects; item rows reuse proj-item*. */
 
 .proj-switcher {
   position: relative;
@@ -38,29 +39,14 @@
   color: var(--ge-text-muted);
   font-size: 11px;
 }
-.proj-switcher-new {
-  font-size: 12px;
-  padding: 5px 10px;
-}
-.proj-switcher-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-}
-.proj-switcher-list {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 91;
-  min-width: 240px;
-  max-width: 320px;
-  max-height: 60vh;
+/* Project list inside the modal window. */
+.proj-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 300px;
+  max-height: 50vh;
   overflow-y: auto;
-  background: var(--ge-surface);
-  border: 1px solid var(--ge-border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
-  padding: 4px;
 }
 .proj-switcher-empty {
   padding: 10px;
@@ -131,4 +117,25 @@
 }
 .proj-rename:focus {
   outline: none;
+}
+/* Footer row inside the modal: inline "new project" input + create button. */
+.proj-new-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.proj-new-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-family: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--ge-border);
+  border-radius: 6px;
+  background: var(--ge-surface);
+  color: var(--ge-text);
+}
+.proj-new-input:focus {
+  outline: none;
+  border-color: var(--ge-accent);
 }

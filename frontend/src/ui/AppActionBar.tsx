@@ -162,49 +162,82 @@ export default function AppActionBar(): JSX.Element {
         <ProjectSwitcher />
       </div>
       <div className="app-bar-actions">
-        <AppBarMenu
-          icon="import"
-          label="Import"
-          busy={archiveBusy}
-          items={[
-            {
-              label: 'Editor JSON (.json)',
-              onSelect: () => importFile(editor),
-            },
-            {
-              label: 'Project archive (.zip)…',
-              onSelect: () => archiveInputRef.current?.click(),
-            },
-          ]}
-        />
-        <AppBarMenu
-          icon="export"
-          label="Export"
-          items={[
-            {
-              label: 'Editor JSON (.json)',
-              onSelect: () =>
-                exportFile(editor, {
-                  fileName: `gitEssay ${new Date().toISOString()}`,
-                  source: 'gitEssay',
-                }),
-            },
-            {
-              label: 'PDF…',
-              disabled: isEditorEmpty,
-              onSelect: () =>
-                exportDocumentAsPdf(
-                  editor,
-                  activeProject?.name ?? 'gitEssay document',
-                ),
-            },
-            {
-              label: 'Project archive (.zip)',
-              disabled: !activeProject,
-              onSelect: downloadProjectArchive,
-            },
-          ]}
-        />
+        <button
+          type="button"
+          className="app-bar-btn"
+          disabled={archiveBusy}
+          onClick={() =>
+            showModal(
+              'Import',
+              onClose => (
+                <OptionList
+                  onClose={onClose}
+                  items={[
+                    {
+                      label: 'Document only (.json)',
+                      desc: 'Load a single document file into the editor.',
+                      onSelect: () => importFile(editor),
+                    },
+                    {
+                      label: 'Project archive (.zip)',
+                      desc: 'Restore a full project — document, versions, chat and literature.',
+                      onSelect: () => archiveInputRef.current?.click(),
+                    },
+                  ]}
+                />
+              ),
+              true,
+            )
+          }
+          title="Import"
+          aria-label="Import">
+          <i className="import" />
+        </button>
+        <button
+          type="button"
+          className="app-bar-btn"
+          onClick={() =>
+            showModal(
+              'Export',
+              onClose => (
+                <OptionList
+                  onClose={onClose}
+                  items={[
+                    {
+                      label: 'Document only (.json)',
+                      desc: 'Save just this document — you can re-import it later.',
+                      onSelect: () =>
+                        exportFile(editor, {
+                          fileName: `gitEssay ${new Date().toISOString()}`,
+                          source: 'gitEssay',
+                        }),
+                    },
+                    {
+                      label: 'PDF (.pdf)',
+                      desc: 'A printable snapshot of this document.',
+                      disabled: isEditorEmpty,
+                      onSelect: () =>
+                        exportDocumentAsPdf(
+                          editor,
+                          activeProject?.name ?? 'gitEssay document',
+                        ),
+                    },
+                    {
+                      label: 'Project archive (.zip)',
+                      desc: 'Full backup of the active project — document, versions, chat and literature.',
+                      disabled: !activeProject,
+                      onSelect: downloadProjectArchive,
+                    },
+                  ]}
+                />
+              ),
+              true,
+            )
+          }
+          title="Export"
+          aria-label="Export">
+          <i className="export" />
+        </button>
         <input
           ref={archiveInputRef}
           type="file"
@@ -278,81 +311,38 @@ export default function AppActionBar(): JSX.Element {
   );
 }
 
-type AppBarMenuItem = {
+type OptionItem = {
   label: string;
+  desc: string;
   onSelect: () => void;
   disabled?: boolean;
 };
 
-/** Icon button with a small drop-down menu, styled after the ProjectSwitcher
- * list. Closes on outside click / Escape / item selection. */
-function AppBarMenu({
-  icon,
-  label,
+/** Option rows inside an Import/Export modal window (useModal chrome, same
+ * look as the Clear dialog). Picking an option closes the modal first. */
+function OptionList({
   items,
-  busy = false,
+  onClose,
 }: {
-  icon: string;
-  label: string;
-  items: AppBarMenuItem[];
-  busy?: boolean;
+  items: OptionItem[];
+  onClose: () => void;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    const onDocMouseDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onDocMouseDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onDocMouseDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
-
   return (
-    <div className="app-bar-menu" ref={rootRef}>
-      <button
-        type="button"
-        className={`app-bar-btn${open ? ' is-active' : ''}`}
-        onClick={() => setOpen(o => !o)}
-        disabled={busy}
-        title={label}
-        aria-label={label}
-        aria-expanded={open}
-        aria-haspopup="menu">
-        <i className={icon} />
-      </button>
-      {open && (
-        <div className="app-bar-menu-list" role="menu" aria-label={label}>
-          {items.map(item => (
-            <button
-              key={item.label}
-              type="button"
-              role="menuitem"
-              className="app-bar-menu-item"
-              disabled={item.disabled}
-              onClick={() => {
-                setOpen(false);
-                item.onSelect();
-              }}>
-              {item.label}
-            </button>
-          ))}
-        </div>
-      )}
+    <div className="app-bar-option-list">
+      {items.map(item => (
+        <button
+          key={item.label}
+          type="button"
+          className="app-bar-option"
+          disabled={item.disabled}
+          onClick={() => {
+            onClose();
+            item.onSelect();
+          }}>
+          <span className="app-bar-option-label">{item.label}</span>
+          <span className="app-bar-option-desc">{item.desc}</span>
+        </button>
+      ))}
     </div>
   );
 }
