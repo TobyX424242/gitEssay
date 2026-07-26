@@ -7,6 +7,7 @@
 # See DESKTOP.md for cross-platform notes (PyInstaller cannot cross-compile;
 # build on each target OS, e.g. via .github/workflows/desktop.yml).
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_all
 
@@ -34,7 +35,9 @@ for pkg in (
         pass
 
 # Trimmed from the frozen app: uvicorn[standard] extras the desktop mode
-# never uses (it pins asyncio/h11, ws=none), plus GUI/tooling strays.
+# never uses (it pins asyncio/h11, ws=none), plus tooling strays.
+# NOTE: `tkinter` must STAY — the bootloader splash screen (Splash below)
+# renders through the bundled Tcl/Tk.
 # NOTE: `websockets` must stay — langgraph_sdk imports it (stream transport),
 # and `dotenv` must stay — the langchain chain imports it lazily at parse time.
 EXCLUDES = [
@@ -43,7 +46,6 @@ EXCLUDES = [
     "httptools",
     "wsproto",
     "watchfiles",
-    "tkinter",
     # torch's own test suite — never imported at runtime.
     # NOTE: `torch.testing` must NOT be excluded: in the frozen build its
     # absence breaks torch's import chain so the first `import torch` fails
@@ -93,9 +95,28 @@ a = Analysis(
 a.datas = [d for d in a.datas if not _drop_payload(d[0])]
 a.binaries = [b for b in a.binaries if not _drop_payload(b[0])]
 pyz = PYZ(a.pure)
+
+# Bootloader-level splash: shown by the PyInstaller bootloader itself, BEFORE
+# the Python interpreter starts — this is what the user sees in the first
+# seconds after double-clicking (Defender scan + interpreter init + WebView2
+# bootstrap all happen underneath it). app.desktop closes it via pyi_splash
+# once the real window is on screen. Tcl/Tk (tkinter) must not be excluded
+# for this to work. Windows-only: macOS windowed builds don't support it, and
+# on Linux it would break the headless smoke test (Tcl/Tk needs a display).
+splash_args = []
+if sys.platform == "win32":
+    splash = Splash(
+        "assets/splash.png",
+        binaries=a.binaries,
+        datas=a.datas,
+        always_on_top=True,
+    )
+    splash_args = [splash, splash.binaries]
+
 exe = EXE(
     pyz,
     a.scripts,
+    *splash_args,
     [],
     exclude_binaries=True,
     name="gitessay",

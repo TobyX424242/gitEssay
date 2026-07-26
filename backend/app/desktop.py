@@ -31,6 +31,56 @@ def _log(msg: str) -> None:
         pass
 
 
+# --- opt-in boot timing ------------------------------------------------------
+# GITESSAY_BOOT_TIMING=1 appends milestones to <data dir>/boot_timing.log (and
+# stdout when there is one). t=0 is when the Python interpreter reaches this
+# module — the gap BEFORE that (PyInstaller bootloader + antivirus scan of the
+# bundle) is only measurable with a stopwatch from double-click; everything
+# after is itemized here.
+_T0 = time.monotonic()
+_TIMING = os.environ.get("GITESSAY_BOOT_TIMING") == "1"
+_timing_buf: list[str] = []
+
+
+def _tmark(label: str) -> None:
+    if not _TIMING:
+        return
+    line = f"{time.monotonic() - _T0:7.3f}s  {label}"
+    _log(f"[boot] {line}")
+    data_dir = os.environ.get("GITESSAY_DATA_DIR")
+    if not data_dir:
+        _timing_buf.append(line)  # flushed once the data dir is known
+        return
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+        with open(
+            os.path.join(data_dir, "boot_timing.log"), "a", encoding="utf-8"
+        ) as f:
+            for buffered in _timing_buf:
+                f.write(buffered + "\n")
+            _timing_buf.clear()
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
+def _close_splash() -> None:
+    """Close the PyInstaller bootloader splash (present only in frozen builds
+    whose spec has a Splash block). Safe to call from anywhere, any number of
+    times, frozen or not."""
+    try:
+        import pyi_splash  # type: ignore[import-not-found]
+
+        if pyi_splash.is_alive():
+            pyi_splash.close()
+            _tmark("bootloader splash closed")
+    except Exception:  # noqa: BLE001 — no splash outside frozen builds
+        pass
+
+
+_tmark("python interpreter up (app.desktop imported)")
+
+
 def _fix_windowed_stdio() -> None:
     """Windowed frozen builds (desktop.spec: console=False) start with
     sys.stdout/sys.stderr = None on Windows. uvicorn's logging setup then
@@ -129,26 +179,33 @@ def _wait_until_up(port: int, timeout: float = 15.0) -> bool:
 
 
 def _start_server(port: int) -> None:
-    """Start uvicorn on a daemon thread. asyncio/h11/no-websockets are chosen
-    explicitly so the frozen build doesn't need uvloop/httptools/websockets —
-    irrelevant perf-wise for a single local client."""
-    from app.main import app  # noqa: PLC0415 — after env setup, paths resolve now
+    """Start uvicorn on a daemon thread. The `from app.main import app` import
+    (FastAPI/SQLAlchemy/langchain — seconds on Windows) MUST happen inside the
+    thread: on the main thread it would delay the webview window by the whole
+    import time. asyncio/h11/no-websockets are chosen explicitly so the frozen
+    build doesn't need uvloop/httptools/websockets — irrelevant perf-wise for
+    a single local client."""
 
-    import uvicorn
+    def _run() -> None:
+        from app.main import app  # noqa: PLC0415 — after env setup, paths resolve now
 
-    config = uvicorn.Config(
-        app,
-        host="127.0.0.1",
-        port=port,
-        loop="asyncio",
-        http="h11",
-        ws="none",
-        log_level="warning",
-        # Windowed frozen builds have no console to colourize (and a None
-        # stdout for uvicorn to probe) — keep the formatter plain.
-        use_colors=False,
-    )
-    threading.Thread(target=uvicorn.Server(config).run, daemon=True).start()
+        import uvicorn
+
+        config = uvicorn.Config(
+            app,
+            host="127.0.0.1",
+            port=port,
+            loop="asyncio",
+            http="h11",
+            ws="none",
+            log_level="warning",
+            # Windowed frozen builds have no console to colourize (and a None
+            # stdout for uvicorn to probe) — keep the formatter plain.
+            use_colors=False,
+        )
+        uvicorn.Server(config).run()
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _open_window(url: str, port: int) -> None:
@@ -162,13 +219,24 @@ def _open_window(url: str, port: int) -> None:
     try:
         import webview
 
+        _tmark("pywebview imported")
         window = webview.create_window(
             "gitEssay", html=_LOADING_HTML, width=1440, height=900, min_size=(900, 600)
         )
 
+        def _on_shown() -> None:
+            # The real window is on screen — the bootloader splash has done
+            # its job (it covered bootloader + interpreter + WebView2 boot).
+            _close_splash()
+            _tmark("webview window shown (loading page)")
+
+        window.events.shown += _on_shown
+
         def _jump_when_ready() -> None:
             if _wait_until_up(port, timeout=60.0):
+                _tmark("server port up")
                 window.load_url(url)
+                _tmark("app URL loaded")
             else:
                 window.load_html(_FAILED_HTML)
 
@@ -177,6 +245,7 @@ def _open_window(url: str, port: int) -> None:
         return
     except Exception as exc:  # noqa: BLE001 — any GUI failure → browser
         _log(f"[gitessay] webview unavailable ({exc}); opening browser instead.")
+    _close_splash()
     if not _wait_until_up(port):
         _log("[gitessay] server failed to start")
         sys.exit(1)
@@ -190,6 +259,7 @@ def _open_window(url: str, port: int) -> None:
 def main() -> None:
     _fix_windowed_stdio()
     data_dir = _setup_environment()
+    _tmark("environment ready (data dir resolved)")
     frontend = _frontend_dir()
     if frontend:
         os.environ.setdefault("GITESSAY_FRONTEND_BUILD", frontend)
@@ -198,6 +268,7 @@ def main() -> None:
     port_arg = _arg_value("--port")
     port = int(port_arg) if port_arg else _free_port()
     _start_server(port)
+    _tmark("uvicorn thread spawned (server imports run in background)")
     url = f"http://127.0.0.1:{port}/"
 
     _log(f"[gitessay] data:     {data_dir}")
@@ -205,9 +276,11 @@ def main() -> None:
     _log(f"[gitessay] serving:  {url}")
 
     if "--server-only" in sys.argv:
+        _close_splash()  # headless: no window will ever dismiss it
         if not _wait_until_up(port):
             _log("[gitessay] server failed to start")
             sys.exit(1)
+        _tmark("server port up")
         try:
             threading.Event().wait()
         except KeyboardInterrupt:

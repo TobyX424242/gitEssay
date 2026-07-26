@@ -48,9 +48,9 @@ sidecar as-is.
 
 | File | Role |
 |---|---|
-| `backend/app/desktop.py` | Desktop entry point: resolve the per-user data dir → set env vars → start uvicorn (free port, asyncio/h11 to avoid frozen-build hidden imports) → open the webview IMMEDIATELY on an inline loading page, then jump to the app once the port answers (browser fallback waits first). `--server-only` runs headless (tests/CI smoke); `--port N` pins the port |
+| `backend/app/desktop.py` | Desktop entry point: resolve the per-user data dir → set env vars → spawn uvicorn on a daemon thread (the heavy `app.main` import happens INSIDE the thread so it never delays the window; free port, asyncio/h11 to avoid frozen-build hidden imports) → open the webview IMMEDIATELY on an inline loading page, then jump to the app once the port answers (browser fallback waits first). `--server-only` runs headless (tests/CI smoke); `--port N` pins the port. `GITESSAY_BOOT_TIMING=1` appends startup milestones to `<data dir>/boot_timing.log` |
 | `backend/app/main.py` | ① Serves the frontend same-origin when `GITESSAY_FRONTEND_BUILD` is set (mounted after the `/api` routers; the docker path is unaffected); ② auto-resumes interrupted literature parses/summaries at startup (with a crash-loop guard; deferred ~5s via a daemon timer so the docling/torch import spike doesn't fight the first page load) and sweeps orphan literature dirs |
-| `backend/desktop_main.py` + `backend/desktop.spec` | PyInstaller entry and packaging config (onedir, `collect_all(docling…, rapidocr)`, `strip=True`, torch test/bin payload dropped, no UPX to reduce antivirus false positives) |
+| `backend/desktop_main.py` + `backend/desktop.spec` | PyInstaller entry and packaging config (onedir, `collect_all(docling…, rapidocr)`, `strip=True`, torch test/bin payload dropped, no UPX to reduce antivirus false positives). Windows builds add a **bootloader splash** (`backend/assets/splash.png`, closed via `pyi_splash` once the webview window is shown) so there's visual feedback from the moment the exe starts — before the Python interpreter even runs |
 | `backend/pyproject.toml` | `desktop` dependency group (platformdirs / pywebview / pyinstaller) — `uv sync --group desktop` |
 | `scripts/build_desktop.py` | The single build entry point for local AND CI: frontend build → deps → PyInstaller → smoke test → versioned archive + SHA256 |
 | `.github/workflows/desktop.yml` | Three-platform CI matrix (PyInstaller can't cross-compile, so each OS builds its own bundle) that calls the same script; publishes a GitHub Release on `v*` tags, validation-builds on pushes to `main`, and runs manually via `workflow_dispatch` |
@@ -71,6 +71,24 @@ Contents: `gitessay.db` (SQLite — all projects/checkpoints/conversations/AI
 settings), `literature/` (uploaded PDF/DOCX originals and extracted figures),
 `huggingface/` (docling layout models, ~500 MB downloaded on first PDF parse).
 Backup = copy the whole directory.
+
+## Startup performance
+
+What happens between double-click and a usable window, and what's done about
+each stage:
+
+| Stage | Typical cost (Windows) | Mitigation |
+|---|---|---|
+| PyInstaller bootloader + Defender real-time scan of the unsigned ~1 GB bundle | 0.5–2 s (worst on first launch) | Bootloader **splash** (`assets/splash.png`) shows from the first moment; **code-sign the exe** (Authenticode) or add the install dir to Defender's exclusion list to cut the real scan time |
+| Python interpreter init + `app.desktop` imports | ~0.3 s | Kept stdlib-only at module level |
+| `import app.main` (FastAPI/SQLAlchemy/**langchain**) | 2–5 s | Runs **inside the server thread** — never delays the window |
+| `import webview` + WebView2 runtime bootstrap | 1–2 s (hard floor for any WebView2 app) | Covered by the splash; window opens on an inline loading page and jumps to the app when the port answers |
+| Resumed PDF parses (docling/torch import spike) | 10–30 s background CPU | Deferred 5 s past startup so it can't fight the first page load |
+
+To profile a real machine: set `GITESSAY_BOOT_TIMING=1` and read
+`<data dir>/boot_timing.log` after launch. `t=0` is when the interpreter
+reaches `app.desktop`; whatever a stopwatch shows before that is
+bootloader+antivirus time.
 
 ## Running and building locally
 
