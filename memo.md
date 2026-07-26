@@ -1,2 +1,0 @@
-- project bar cover by side bar, not expected
-- inline equation insert should be allowed
