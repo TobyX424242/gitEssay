@@ -266,9 +266,7 @@ export default function AISettingsPanel({
               Set the base URL, model, and API key to start using the AI.
             </p>
           )}
-          <p className="ai-note ai-note--muted">
-            Your key is stored on the server, never in the browser.
-          </p>
+
 
           {testResult && (
             <p className={`ai-test ${testResult.ok ? 'is-ok' : 'is-err'}`}>
