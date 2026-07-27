@@ -142,15 +142,25 @@ pyz = PYZ(a.pure)
 # the Python interpreter starts — this is what the user sees in the first
 # seconds after double-clicking (Defender scan + interpreter init + WebView2
 # bootstrap all happen underneath it). app.desktop closes it via pyi_splash
-# once the real window is on screen. Tcl/Tk (tkinter) must not be excluded
-# for this to work. Windows-only: macOS windowed builds don't support it, and
-# on Linux it would break the headless smoke test (Tcl/Tk needs a display).
+# once the real window is on screen, and updates its status line at milestones
+# (pyi_splash.update_text — needs text_pos to exist) so a cold first launch
+# shows live progress instead of a static image. Tcl/Tk (tkinter) must not be
+# excluded for this to work. Windows-only: macOS windowed builds don't support
+# it, and on Linux it would break the headless smoke test (Tcl/Tk needs a
+# display).
 splash_args = []
 if sys.platform == "win32":
     splash = Splash(
         "assets/splash.png",
         binaries=a.binaries,
         datas=a.datas,
+        # Status line along the bottom of the 480x270 image (dark background,
+        # so light gray text). Keep update_text messages short — the line
+        # clips at the image edge.
+        text_pos=(24, 236),
+        text_size=11,
+        text_color="#9a9aa5",
+        text_default="Starting gitEssay",
         always_on_top=True,
     )
     splash_args = [splash, splash.binaries]

@@ -1,16 +1,45 @@
 """gitEssay backend — AI router: settings, connectivity test, LangGraph agent."""
 import asyncio
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app import agent_graph, ai, schemas
+from app import ai, schemas
 from app.db import get_db
 from app.models import AISettings
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(tags=["ai"])
+
+
+def _load_agent_stack():
+    """Import the LangGraph agent stack ON DEMAND, not at module level.
+
+    `app.agent_graph` pulls in langchain/langgraph/langchain-anthropic/
+    langchain-openai, and those eagerly import transformers + torch — measured
+    at ~80% of the whole `import app.main` cost (seconds warm, tens of seconds
+    on a cold first launch with antivirus scanning the bundle). Keeping it off
+    the startup path lets the desktop window show the real app almost
+    immediately; the background warm-up in main._lifespan then makes the first
+    agent request cheap too. Returns the agent_graph module (import is cached,
+    so repeat calls are free).
+    """
+    from app import agent_graph  # noqa: PLC0415 — deliberate lazy import
+
+    return agent_graph
+
+
+def warm_agent_stack() -> None:
+    """Pre-import the agent stack from a background thread after startup so the
+    first /agent/run doesn't eat the full import cost."""
+    try:
+        _load_agent_stack()
+    except Exception:  # noqa: BLE001 — a warm-up failure must not kill startup;
+        log.exception("agent stack warm-up failed")  # the endpoint retries lazily
 
 
 def _settings(db: Session) -> AISettings:
@@ -108,6 +137,9 @@ async def agent_run(body: schemas.AgentRunRequest, db: Session = Depends(get_db)
             status_code=400,
             detail="AI is not configured (set provider/key/model in settings)",
         )
+    # Normally a no-op thanks to the startup warm-up; on the rare early request
+    # it pays the one-time import off the event loop.
+    agent_graph = await asyncio.to_thread(_load_agent_stack)
 
     async def gen():
         try:

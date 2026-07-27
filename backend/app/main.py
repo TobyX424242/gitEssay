@@ -203,6 +203,13 @@ def _startup() -> None:
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     _startup()
+    # Warm the LangGraph agent stack (langchain/transformers/torch) in the
+    # background: routers/ai.py imports it lazily now so it can't stall the
+    # first page load, and this makes the first /agent/run cheap too. Deferred
+    # so the import spike doesn't fight that first page load.
+    warmup_timer = threading.Timer(3.0, ai_router.warm_agent_stack)
+    warmup_timer.daemon = True
+    warmup_timer.start()
     # Defer resuming interrupted literature work: the first ingest import pulls
     # in docling+torch (a 10-30s CPU/disk spike) that would otherwise fight the
     # desktop webview's first page load. Daemon timer so shutdown isn't blocked.

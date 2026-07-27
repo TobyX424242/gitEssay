@@ -64,20 +64,53 @@ def _tmark(label: str) -> None:
         pass
 
 
-def _close_splash() -> None:
-    """Close the PyInstaller bootloader splash (present only in frozen builds
-    whose spec has a Splash block — the bootloader sets _PYI_SPLASH_IPC only
-    when it actually started one). Safe to call from anywhere, any number of
-    times, frozen or not."""
+_splash_mod = None  # pyi_splash module, cached after first import
+
+
+def _get_splash():
+    """Return the live pyi_splash module, or None when this build has no splash
+    (or it has been closed). Importing pyi_splash consumes the _PYI_SPLASH_IPC
+    env var on first import, so cache the module — later calls must not key off
+    the env var. is_alive() gates every use; close() flips it to False."""
+    global _splash_mod
+    if _splash_mod is not None:
+        return _splash_mod if _splash_mod.is_alive() else None
     if "_PYI_SPLASH_IPC" not in os.environ:
-        return  # no splash in this build — nothing to do (and importing
+        return None  # no splash in this build — nothing to do (and importing
         # pyi_splash without it just logs a harmless-but-noisy warning)
     try:
         import pyi_splash  # type: ignore[import-not-found]
 
-        if pyi_splash.is_alive():
-            pyi_splash.close()
-            _tmark("bootloader splash closed")
+        _splash_mod = pyi_splash
+        return pyi_splash if pyi_splash.is_alive() else None
+    except Exception:  # noqa: BLE001 — never let splash handling kill startup
+        return None
+
+
+def _close_splash() -> None:
+    """Close the PyInstaller bootloader splash (present only in frozen builds
+    whose spec has a Splash block). Safe to call from anywhere, any number of
+    times, frozen or not."""
+    splash = _get_splash()
+    if splash is None:
+        return
+    try:
+        splash.close()
+        _tmark("bootloader splash closed")
+    except Exception:  # noqa: BLE001 — never let splash handling kill startup
+        pass
+
+
+def _splash_text(msg: str) -> None:
+    """Update the bootloader splash's status line (spec: Splash text_pos).
+    Covers the pre-window phase (interpreter init + webview import + WebView2
+    bootstrap), which on a cold first launch is the slow part. The message is
+    interpolated raw into a Tcl command — keep it free of (){}[]$" chars."""
+    splash = _get_splash()
+    if splash is None:
+        return
+    try:
+        splash.update_text(msg)
     except Exception:  # noqa: BLE001 — never let splash handling kill startup
         pass
 
@@ -147,6 +180,10 @@ def _free_port() -> int:
 
 # Inline first-paint pages for the desktop window (zero external deps — the
 # whole point is that they render instantly while the server is still booting).
+# The loading page updates ITSELF on plain JS timers (no IPC back into Python):
+# a fast warm launch never sees more than the first line, while a cold first
+# launch (Defender scan of the bundle + cold disk cache) escalates to an
+# explanation instead of looking hung.
 _LOADING_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><title>gitEssay</title>
 <style>
@@ -157,9 +194,26 @@ _LOADING_HTML = """<!doctype html>
   .spin{width:36px;height:36px;border-radius:50%;border:3px solid #444;
         border-top-color:#7aa2ff;animation:r .8s linear infinite}
   @keyframes r{to{transform:rotate(360deg)}}
-  p{margin:0;font-size:14px;color:#9a9aa5}
+  p{margin:0;font-size:14px;color:#9a9aa5;transition:opacity .4s}
+  #sub{font-size:12px;color:#6d6d78;max-width:420px;text-align:center;
+      line-height:1.6;opacity:0}
+  #sub.show{opacity:1}
 </style></head>
-<body><div class="spin"></div><p>Starting gitEssay&hellip;</p></body></html>"""
+<body><div class="spin"></div><p id="msg">Starting gitEssay&hellip;</p><p id="sub"></p>
+<script>
+  var msg = document.getElementById('msg'), sub = document.getElementById('sub');
+  setTimeout(function () {
+    msg.textContent = 'Loading components…';
+    sub.textContent = 'The first launch takes longer than usual.';
+    sub.className = 'show';
+  }, 8000);
+  setTimeout(function () {
+    msg.textContent = 'Still loading…';
+    sub.textContent = 'A first launch (or an antivirus scan) can take a few ' +
+      'minutes — later launches start in seconds.';
+    sub.className = 'show';
+  }, 30000);
+</script></body></html>"""
 
 _FAILED_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><title>gitEssay</title>
@@ -184,11 +238,11 @@ def _wait_until_up(port: int, timeout: float = 15.0) -> bool:
 
 def _start_server(port: int) -> None:
     """Start uvicorn on a daemon thread. The `from app.main import app` import
-    (FastAPI/SQLAlchemy/langchain — seconds on Windows) MUST happen inside the
-    thread: on the main thread it would delay the webview window by the whole
-    import time. asyncio/h11/no-websockets are chosen explicitly so the frozen
-    build doesn't need uvloop/httptools/websockets — irrelevant perf-wise for
-    a single local client."""
+    (~1s — FastAPI/SQLAlchemy; the heavy LangGraph agent stack is lazy, see
+    routers/ai.py) still happens inside the thread so it never delays the
+    webview window. asyncio/h11/no-websockets are chosen explicitly so the
+    frozen build doesn't need uvloop/httptools/websockets — irrelevant
+    perf-wise for a single local client."""
 
     def _run() -> None:
         from app.main import app  # noqa: PLC0415 — after env setup, paths resolve now
@@ -216,14 +270,17 @@ def _open_window(url: str, port: int) -> None:
     """Native webview window; fall back to the system browser (headless Linux,
     missing GTK/Qt). Either way this blocks until shutdown.
 
-    The window opens IMMEDIATELY on an inline loading page — importing the
-    server (langchain/numpy/…) can take many seconds on Windows, and showing
-    nothing the whole time reads as "the app didn't launch". Once the port
-    answers, the window jumps to the real app."""
+    The window opens IMMEDIATELY on an inline loading page — on a cold first
+    launch (antivirus scan + cold disk cache) even the slimmed-down server
+    import can take many seconds, and showing nothing the whole time reads as
+    "the app didn't launch". Once the port answers, the window jumps to the
+    real app."""
     try:
+        _splash_text("Loading window toolkit")
         import webview
 
         _tmark("pywebview imported")
+        _splash_text("Opening window")
         window = webview.create_window(
             "gitEssay", html=_LOADING_HTML, width=1440, height=900, min_size=(900, 600)
         )
@@ -237,7 +294,10 @@ def _open_window(url: str, port: int) -> None:
         window.events.shown += _on_shown
 
         def _jump_when_ready() -> None:
-            if _wait_until_up(port, timeout=60.0):
+            # Generous timeout: a cold first launch under a real-time antivirus
+            # scan can stretch the server import well past a minute, and a
+            # false "failed to start" here is far worse than a slow one.
+            if _wait_until_up(port, timeout=180.0):
                 _tmark("server port up")
                 window.load_url(url)
                 _tmark("app URL loaded")
@@ -284,6 +344,7 @@ def _check_webview() -> None:
 
 def main() -> None:
     _fix_windowed_stdio()
+    _splash_text("Preparing environment")
     data_dir = _setup_environment()
     _tmark("environment ready (data dir resolved)")
     frontend = _frontend_dir()
@@ -293,6 +354,7 @@ def main() -> None:
     # --port N pins the port (smoke tests/CI); default is a free random one.
     port_arg = _arg_value("--port")
     port = int(port_arg) if port_arg else _free_port()
+    _splash_text("Starting server")
     _start_server(port)
     _tmark("uvicorn thread spawned (server imports run in background)")
     url = f"http://127.0.0.1:{port}/"
