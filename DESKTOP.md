@@ -126,10 +126,11 @@ validation build (artifacts only, no Release).
 
 Linux notes: the AppImage bundles Qt WebEngine (pywebview's Qt backend) so
 the window never needs system WebKitGTK or a browser, but Qt still expects
-common desktop shared libs on the host (libnss3, libxkbcommon, libGL/xcb —
-present on any distro that can run Chrome/Firefox). AppImages also need
-FUSE 2 at runtime (`--appimage-extract-and-run` works without it). Built on
-ubuntu-latest (glibc 2.39), so distros older than ~2024 are unsupported.
+common desktop shared libs on the host (libEGL/libGL, libnss3, libxkbcommon,
+libxcb — present on any distro that can run Chrome/Firefox). AppImages also
+need FUSE 2 at runtime (`--appimage-extract-and-run` works without it).
+Built on ubuntu-latest (glibc 2.39), so distros older than ~2024 are
+unsupported.
 
 ## Risks and caveats
 

@@ -54,7 +54,7 @@ jobs:
       # DESKTOP.md "Startup performance"/packaging notes.
       - name: Linux system libs for opencv + Qt WebEngine
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0 libxcb1 libnss3 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2t64
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libegl1 libglib2.0-0 libxcb1 libnss3 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2t64
 
       - name: Resolve version
         id: ver

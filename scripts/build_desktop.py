@@ -125,7 +125,8 @@ def webview_check() -> None:
     r = subprocess.run(
         [binary_path(), "--check-webview"],
         env=env,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,  # Qt/Python errors go to stderr — keep them
         text=True,
         errors="replace",
         timeout=180,
