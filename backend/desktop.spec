@@ -34,6 +34,24 @@ for pkg in (
     except Exception:
         pass
 
+# Linux AppImage: the window runs on pywebview's Qt backend (bundled
+# PyQt6-WebEngine) instead of system WebKitGTK. pywebview imports its platform
+# module and the Qt bindings lazily at runtime, so PyInstaller can't see them
+# — list them explicitly. The PyQt6 hooks then pull in the Qt libs,
+# QtWebEngineProcess, and webengine resources.
+if sys.platform == "linux":
+    hiddenimports += [
+        "webview.platforms.qt",
+        "qtpy",
+        "PyQt6.QtCore",
+        "PyQt6.QtGui",
+        "PyQt6.QtWidgets",
+        "PyQt6.QtNetwork",
+        "PyQt6.QtWebChannel",
+        "PyQt6.QtWebEngineCore",
+        "PyQt6.QtWebEngineWidgets",
+    ]
+
 # Trimmed from the frozen app: uvicorn[standard] extras the desktop mode
 # never uses (it pins asyncio/h11, ws=none), plus tooling strays.
 # NOTE: `tkinter` must STAY — the bootloader splash screen (Splash below)
@@ -126,6 +144,9 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    # Windows: embed the app icon (taskbar/explorer/shortcut). Linux ignores
+    # icons on the exe; macOS gets its icon from the BUNDLE below.
+    icon="assets/icon.ico" if sys.platform == "win32" else None,
 )
 coll = COLLECT(
     exe,
@@ -139,3 +160,14 @@ coll = COLLECT(
     upx=False,  # UPX inflates antivirus false-positive rates; skip it
     name="gitessay",
 )
+
+# macOS: wrap the onedir bundle as gitEssay.app so the DMG ships a real
+# double-clickable app with the icon in Finder/Dock. Windows/Linux keep the
+# plain onedir output (installer / AppImage handle their presentation).
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name="gitEssay.app",
+        icon="assets/icon.icns",
+        bundle_identifier="com.gitessay.app",
+    )

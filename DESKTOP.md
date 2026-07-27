@@ -50,9 +50,11 @@ sidecar as-is.
 |---|---|
 | `backend/app/desktop.py` | Desktop entry point: resolve the per-user data dir → set env vars → spawn uvicorn on a daemon thread (the heavy `app.main` import happens INSIDE the thread so it never delays the window; free port, asyncio/h11 to avoid frozen-build hidden imports) → open the webview IMMEDIATELY on an inline loading page, then jump to the app once the port answers (browser fallback waits first). `--server-only` runs headless (tests/CI smoke); `--port N` pins the port. `GITESSAY_BOOT_TIMING=1` appends startup milestones to `<data dir>/boot_timing.log` |
 | `backend/app/main.py` | ① Serves the frontend same-origin when `GITESSAY_FRONTEND_BUILD` is set (mounted after the `/api` routers; the docker path is unaffected); ② auto-resumes interrupted literature parses/summaries at startup (with a crash-loop guard; deferred ~5s via a daemon timer so the docling/torch import spike doesn't fight the first page load) and sweeps orphan literature dirs |
-| `backend/desktop_main.py` + `backend/desktop.spec` | PyInstaller entry and packaging config (onedir, `collect_all(docling…, rapidocr)`, `strip=True`, torch test/bin payload dropped, no UPX to reduce antivirus false positives). Windows builds add a **bootloader splash** (`backend/assets/splash.png`, closed via `pyi_splash` once the webview window is shown) so there's visual feedback from the moment the exe starts — before the Python interpreter even runs |
-| `backend/pyproject.toml` | `desktop` dependency group (platformdirs / pywebview / pyinstaller) — `uv sync --group desktop` |
-| `scripts/build_desktop.py` | The single build entry point for local AND CI: frontend build → deps → PyInstaller → smoke test → versioned archive + SHA256 |
+| `backend/desktop_main.py` + `backend/desktop.spec` | PyInstaller entry and packaging config (onedir, `collect_all(docling…, rapidocr)`, `strip=True`, torch test/bin payload dropped, no UPX to reduce antivirus false positives). Windows builds add a **bootloader splash** (`backend/assets/splash.png`, closed via `pyi_splash` once the webview window is shown) so there's visual feedback from the moment the exe starts — before the Python interpreter even runs — plus the exe icon (`assets/icon.ico`); Linux adds Qt backend hiddenimports (pywebview imports them lazily); macOS wraps the onedir output in a `gitEssay.app` BUNDLE (`assets/icon.icns`) |
+| `backend/pyproject.toml` | `desktop` dependency group (platformdirs / pywebview / pyinstaller; Linux-only: PyQt6 + PyQt6-WebEngine + QtPy — the AppImage's bundled webview backend) — `uv sync --group desktop` |
+| `scripts/build_desktop.py` | The single build entry point for local AND CI: frontend build → deps → PyInstaller → smoke test → Linux webview check (`--check-webview` offscreen) → per-OS package (**AppImage** / **Inno Setup installer** / **DMG**) + SHA256 |
+| `scripts/make_icons.py` + `design/logo.png` → `backend/assets/` | Icon pipeline: crops the quill glyph out of the archived source logo (`design/logo.png`, kept ONLY as the regeneration source — builds consume the committed `backend/assets/icon.*` artifacts), white→transparent via luminance-alpha **un-blend** (no white halo on dark backgrounds), square pad → `icon.png`/`icon-256.png` (Linux), `icon.ico` (Windows), `icon.icns` (macOS). Re-run only when the logo changes |
+| `backend/packaging/` | Packaging assets: `gitessay.iss` (Inno Setup — per-user install, wizard, Start Menu/desktop shortcuts, stable AppId for upgrades), `AppRun` + `gitessay.desktop` (AppImage entry; sets `QTWEBENGINE_DISABLE_SANDBOX`) |
 | `.github/workflows/desktop.yml` | Three-platform CI matrix (PyInstaller can't cross-compile, so each OS builds its own bundle) that calls the same script; publishes a GitHub Release on `v*` tags, validation-builds on pushes to `main`, and runs manually via `workflow_dispatch` |
 | `.github/workflows/ci.yml` | Lightweight per-push/PR CI: backend pytest + frontend build (packaging stays in desktop.yml) |
 
@@ -99,11 +101,19 @@ uv run python -m app.desktop                  # native webview window
 uv run python -m app.desktop --server-only    # server only (headless)
 
 # Package (builds for the current OS) — local and CI share ONE script
-python3 scripts/build_desktop.py                  # full pipeline: frontend → deps → PyInstaller → smoke → archive
+python3 scripts/build_desktop.py                  # full pipeline: frontend → deps → PyInstaller → smoke → webview check → package
 python3 scripts/build_desktop.py --skip-frontend  # reuse the existing frontend/build
-py -3 scripts\build_desktop.py                    # the Windows equivalent
-# Output: backend/dist/gitessay-<version>-<os>-<arch>.(tar.gz|zip) + .sha256
+py -3 scripts\build_desktop.py                    # the Windows equivalent (needs Inno Setup 6)
+# Output (backend/dist/):
+#   linux   gitessay-<version>-linux-x64.AppImage     — self-contained window
+#           (bundled Qt WebEngine; NO system WebKitGTK/browser needed)
+#   windows gitessay-<version>-windows-x64-setup.exe  — Inno Setup installer
+#           (per-user, no admin; wizard + Start Menu/desktop shortcuts)
+#   macos   gitessay-<version>-macos-arm64.dmg        — gitEssay.app + drag-to-Applications
 # Version: --version flag > GITESSAY_VERSION env > git describe > dev
+# Icons:    backend/.venv/bin/python scripts/make_icons.py  (regenerates the
+#           committed backend/assets/icon.* from design/logo.png — only needed
+#           when the logo changes; builds always use the assets as-is)
 ```
 
 The platform bundles (linux-x64 / windows-x64 / macos-arm64 — Apple Silicon
@@ -111,8 +121,15 @@ only, Intel Macs are not a target) are built by
 `.github/workflows/desktop.yml` — CI invokes the **same**
 `scripts/build_desktop.py` and only adds system dependencies, npm/uv caching,
 and artifact upload. Pushing a `v*` tag creates a GitHub Release with all
-archives and their checksums; pushes to `main` run the same matrix as a
+packages and their checksums; pushes to `main` run the same matrix as a
 validation build (artifacts only, no Release).
+
+Linux notes: the AppImage bundles Qt WebEngine (pywebview's Qt backend) so
+the window never needs system WebKitGTK or a browser, but Qt still expects
+common desktop shared libs on the host (libnss3, libxkbcommon, libGL/xcb —
+present on any distro that can run Chrome/Firefox). AppImages also need
+FUSE 2 at runtime (`--appimage-extract-and-run` works without it). Built on
+ubuntu-latest (glibc 2.39), so distros older than ~2024 are unsupported.
 
 ## Risks and caveats
 

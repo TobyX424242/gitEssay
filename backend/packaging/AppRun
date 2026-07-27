@@ -1,0 +1,9 @@
+#!/bin/sh
+# AppImage entry point. The PyInstaller onedir bundle lives at
+# usr/share/gitessay/; usr/bin/gitessay is a symlink to it (desktop-file Exec
+# conventions). QtWebEngine's Chromium sandbox can't get its setuid helper
+# inside an AppImage mount, so disable it (single-user local app, same trust
+# domain as the browser it replaces).
+HERE="$(dirname "$(readlink -f "$0")")"
+export QTWEBENGINE_DISABLE_SANDBOX=1
+exec "$HERE/usr/bin/gitessay" "$@"

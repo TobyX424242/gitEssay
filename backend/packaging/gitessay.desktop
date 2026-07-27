@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=gitEssay
+Comment=Local-first AI academic-writing surface
+Exec=gitessay
+Icon=gitessay
+Categories=Office;
+Terminal=false
+Keywords=writing;academic;ai;editor;

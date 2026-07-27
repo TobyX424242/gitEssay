@@ -66,15 +66,19 @@ def _tmark(label: str) -> None:
 
 def _close_splash() -> None:
     """Close the PyInstaller bootloader splash (present only in frozen builds
-    whose spec has a Splash block). Safe to call from anywhere, any number of
+    whose spec has a Splash block — the bootloader sets _PYI_SPLASH_IPC only
+    when it actually started one). Safe to call from anywhere, any number of
     times, frozen or not."""
+    if "_PYI_SPLASH_IPC" not in os.environ:
+        return  # no splash in this build — nothing to do (and importing
+        # pyi_splash without it just logs a harmless-but-noisy warning)
     try:
         import pyi_splash  # type: ignore[import-not-found]
 
         if pyi_splash.is_alive():
             pyi_splash.close()
             _tmark("bootloader splash closed")
-    except Exception:  # noqa: BLE001 — no splash outside frozen builds
+    except Exception:  # noqa: BLE001 — never let splash handling kill startup
         pass
 
 
@@ -241,7 +245,10 @@ def _open_window(url: str, port: int) -> None:
                 window.load_html(_FAILED_HTML)
 
         threading.Thread(target=_jump_when_ready, daemon=True).start()
-        webview.start()
+        # Linux: force the Qt backend — the AppImage bundles PyQt6-WebEngine,
+        # so the window needs no system WebKitGTK/browser. Windows/macOS use
+        # the OS webview (WebView2 / WKWebView) via pywebview's default.
+        webview.start(gui="qt" if sys.platform == "linux" else None)
         return
     except Exception as exc:  # noqa: BLE001 — any GUI failure → browser
         _log(f"[gitessay] webview unavailable ({exc}); opening browser instead.")
@@ -254,6 +261,25 @@ def _open_window(url: str, port: int) -> None:
         threading.Event().wait()  # block until Ctrl+C
     except KeyboardInterrupt:
         pass
+
+
+def _check_webview() -> None:
+    """--check-webview: verify the bundled webview backend imports and a Qt
+    offscreen application + WebEngine view can be constructed, then exit.
+    Used by the build pipeline to validate the Linux AppImage's Qt WebEngine
+    payload headlessly (QT_QPA_PLATFORM=offscreen)."""
+    import importlib
+
+    qt = importlib.import_module("webview.platforms.qt")
+    _log(f"[gitessay] webview qt platform ok: {qt.__file__}")
+    from PyQt6.QtWebEngineWidgets import QWebEngineView
+    from PyQt6.QtWidgets import QApplication
+
+    app = QApplication([])
+    view = QWebEngineView()
+    view.resize(200, 100)
+    _log("[gitessay] QWebEngineView constructed — webview backend OK")
+    del view, app
 
 
 def main() -> None:
@@ -274,6 +300,11 @@ def main() -> None:
     _log(f"[gitessay] data:     {data_dir}")
     _log(f"[gitessay] frontend: {frontend or '(API only — no build found)'}")
     _log(f"[gitessay] serving:  {url}")
+
+    if "--check-webview" in sys.argv:
+        _close_splash()
+        _check_webview()
+        return
 
     if "--server-only" in sys.argv:
         _close_splash()  # headless: no window will ever dismiss it

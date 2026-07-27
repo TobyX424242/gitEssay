@@ -45,6 +45,15 @@ desktop = [
     "platformdirs>=4.3",
     "pywebview>=5.4",
     "pyinstaller>=6.11",
+    # Linux webview backend bundled into the AppImage: pywebview's default
+    # GTK/WebKitGTK backend needs system packages (PyGObject + WebKitGTK),
+    # which AppImages can't rely on — PyQt6-WebEngine wheels are fully
+    # self-contained, so the window never falls back to the system browser.
+    # Windows/macOS use the OS webview (WebView2 / WKWebView) instead.
+    "PyQt6>=6.7; sys_platform == 'linux'",
+    "PyQt6-WebEngine>=6.7; sys_platform == 'linux'",
+    # pywebview 6.x's Qt backend imports the qtpy shim.
+    "QtPy>=2.4; sys_platform == 'linux'",
 ]
 
 # CPU-only PyTorch wheels: the PyPI `torch` wheel drags in ~3 GB of CUDA

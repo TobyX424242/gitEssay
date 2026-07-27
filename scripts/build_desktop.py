@@ -12,8 +12,12 @@ Usage (from the repo root, any Python 3.10+):
     python3 scripts/build_desktop.py --skip-smoke     # skip the smoke test
     python3 scripts/build_desktop.py --version 1.2.3  # override version
 
-Requires: node/npm (frontend) and uv (backend) on PATH.
-Output: backend/dist/gitessay-<version>-<os>-<arch>.(tar.gz|zip) + .sha256
+Requires: node/npm (frontend) and uv (backend) on PATH. Windows packaging
+also needs Inno Setup 6 (preinstalled on windows-latest CI runners).
+Output (backend/dist/):
+  linux   gitessay-<version>-linux-x64.AppImage        (+ .sha256)
+  windows gitessay-<version>-windows-x64-setup.exe     (+ .sha256)
+  macos   gitessay-<version>-macos-arm64.dmg           (+ .sha256)
 """
 from __future__ import annotations
 
@@ -25,10 +29,8 @@ import shutil
 import socket
 import subprocess
 import sys
-import tarfile
 import time
 import urllib.request
-import zipfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FRONTEND = os.path.join(REPO, "frontend")
@@ -106,6 +108,32 @@ def platform_tag() -> str:
 def binary_path() -> str:
     exe = "gitessay.exe" if sys.platform == "win32" else "gitessay"
     return os.path.join(DIST, "gitessay", exe)
+
+
+def webview_check() -> None:
+    """Linux-only: verify the frozen bundle's Qt WebEngine backend imports and
+    constructs offscreen — the AppImage's whole point is a window that never
+    falls back to the system browser, so gate the build on it."""
+    if sys.platform != "linux":
+        return
+    step("webview backend check")
+    env = dict(
+        os.environ,
+        QT_QPA_PLATFORM="offscreen",
+        QTWEBENGINE_DISABLE_SANDBOX="1",
+    )
+    r = subprocess.run(
+        [binary_path(), "--check-webview"],
+        env=env,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=180,
+    )
+    tail = "\n".join((r.stdout or "").splitlines()[-20:])
+    if r.returncode != 0 or "webview backend OK" not in (r.stdout or ""):
+        die(f"webview check failed ({r.returncode}):\n{tail}")
+    log("webview   Qt WebEngine backend ok")
 
 
 def smoke_test() -> None:
@@ -206,33 +234,143 @@ def dedupe_hardlinks() -> None:
     log(f"dedupe    reclaimed {saved / 1024 / 1024:.0f} MB")
 
 
-def make_archive(version: str) -> str:
-    step("archive")
+def write_sha256(path: str) -> None:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    with open(path + ".sha256", "w") as fh:
+        fh.write(f"{digest.hexdigest()}  {os.path.basename(path)}\n")
+    size_mb = os.path.getsize(path) / 1024 / 1024
+    log(f"package   {os.path.relpath(path, REPO)}  ({size_mb:.0f} MB)")
+    log(f"sha256    {digest.hexdigest()}")
+
+
+# --- Linux: AppImage ---------------------------------------------------------
+APPIMAGETOOL_URL = (
+    "https://github.com/AppImage/appimagetool/releases/download/"
+    "continuous/appimagetool-x86_64.AppImage"
+)
+
+
+def ensure_appimagetool() -> str:
+    """Runnable appimagetool path (downloaded + extracted once; running the
+    extracted squashfs-root/AppRun needs no FUSE, unlike the AppImage itself)."""
+    tools = os.path.join(DIST, "tools")
+    apprun = os.path.join(tools, "squashfs-root", "AppRun")
+    if os.path.isfile(apprun):
+        return apprun
+    os.makedirs(tools, exist_ok=True)
+    img = os.path.join(tools, "appimagetool.AppImage")
+    log(f"download  {APPIMAGETOOL_URL}")
+    urllib.request.urlretrieve(APPIMAGETOOL_URL, img)
+    os.chmod(img, 0o755)
+    r = subprocess.run([img, "--appimage-extract"], cwd=tools)
+    if r.returncode != 0 or not os.path.isfile(apprun):
+        die("appimagetool download/extraction failed")
+    return apprun
+
+
+def make_appimage(version: str) -> str:
+    """gitessay.AppDir → .AppImage. Layout: the PyInstaller onedir bundle goes
+    to usr/share/gitessay/ with a usr/bin/gitessay symlink for the .desktop
+    Exec; AppRun sets QTWEBENGINE_DISABLE_SANDBOX (Chromium's setuid sandbox
+    helper can't work inside an AppImage mount) and execs the binary."""
+    step("appimage")
     bundle = os.path.join(DIST, "gitessay")
     if not os.path.isdir(bundle):
         die(f"bundle not found: {bundle}")
-    tag = platform_tag()
-    if sys.platform == "win32":
-        out = os.path.join(DIST, f"gitessay-{version}-{tag}.zip")
-        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
-            for root, _dirs, files in os.walk(bundle):
-                for f in files:
-                    p = os.path.join(root, f)
-                    z.write(p, os.path.join("gitessay", os.path.relpath(p, bundle)))
-    else:
-        out = os.path.join(DIST, f"gitessay-{version}-{tag}.tar.gz")
-        with tarfile.open(out, "w:gz", compresslevel=6) as t:
-            t.add(bundle, arcname="gitessay")
-    digest = hashlib.sha256()
-    with open(out, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(chunk)
-    with open(out + ".sha256", "w") as fh:
-        fh.write(f"{digest.hexdigest()}  {os.path.basename(out)}\n")
-    size_mb = os.path.getsize(out) / 1024 / 1024
-    log(f"archive   {os.path.relpath(out, REPO)}  ({size_mb:.0f} MB)")
-    log(f"sha256    {digest.hexdigest()}")
+    appdir = os.path.join(DIST, "gitessay.AppDir")
+    shutil.rmtree(appdir, ignore_errors=True)
+    os.makedirs(os.path.join(appdir, "usr", "bin"))
+    shutil.copytree(bundle, os.path.join(appdir, "usr", "share", "gitessay"), symlinks=True)
+    os.symlink(
+        "../share/gitessay/gitessay", os.path.join(appdir, "usr", "bin", "gitessay")
+    )
+    pkg = os.path.join(BACKEND, "packaging")
+    shutil.copy(os.path.join(pkg, "AppRun"), os.path.join(appdir, "AppRun"))
+    os.chmod(os.path.join(appdir, "AppRun"), 0o755)
+    shutil.copy(os.path.join(pkg, "gitessay.desktop"), os.path.join(appdir, "gitessay.desktop"))
+    shutil.copy(
+        os.path.join(BACKEND, "assets", "icon-256.png"),
+        os.path.join(appdir, "gitessay.png"),
+    )
+    tool = ensure_appimagetool()
+    out = os.path.join(DIST, f"gitessay-{version}-{platform_tag()}.AppImage")
+    machine = platform.machine()
+    env = dict(os.environ, ARCH="aarch64" if machine in ("arm64", "aarch64") else "x86_64")
+    r = subprocess.run([tool, appdir, out], env=env)
+    if r.returncode != 0:
+        die(f"appimagetool failed ({r.returncode})")
+    os.chmod(out, 0o755)
+    write_sha256(out)
     return out
+
+
+# --- Windows: Inno Setup installer -------------------------------------------
+def make_installer(version: str) -> str:
+    """Compile backend/packaging/gitessay.iss → <name>-setup.exe (per-user
+    install under %LOCALAPPDATA%\\Programs, wizard + Start Menu/desktop
+    shortcuts, no admin required)."""
+    step("inno setup installer")
+    candidates = [
+        shutil.which("ISCC.exe"),
+        shutil.which("iscc"),
+        r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    ]
+    iscc = next((c for c in candidates if c and os.path.isfile(c)), None)
+    if not iscc:
+        die("Inno Setup 6 not found — install: https://jrsoftware.org/isinfo.php")
+    name = f"gitessay-{version}-{platform_tag()}-setup"
+    cmd = [
+        iscc,
+        f"/DAppVersion={version}",
+        f"/DSourceDir={os.path.join(DIST, 'gitessay')}",
+        f"/DIconFile={os.path.join(BACKEND, 'assets', 'icon.ico')}",
+        f"/DOutputDir={DIST}",
+        f"/DOutputName={name}",
+        os.path.join(BACKEND, "packaging", "gitessay.iss"),
+    ]
+    # run() uses shell=True on Windows — quote args containing spaces.
+    run([f'"{c}"' if " " in c else c for c in cmd], cwd=BACKEND)
+    out = os.path.join(DIST, name + ".exe")
+    if not os.path.isfile(out):
+        die(f"installer not produced: {out}")
+    write_sha256(out)
+    return out
+
+
+# --- macOS: DMG ---------------------------------------------------------------
+def make_dmg(version: str) -> str:
+    """Wrap dist/gitEssay.app (from the spec's BUNDLE step) in a compressed
+    DMG with the classic drag-to-Applications symlink."""
+    step("dmg")
+    app = os.path.join(DIST, "gitEssay.app")
+    if not os.path.isdir(app):
+        die(f"app bundle not found: {app}")
+    staging = os.path.join(DIST, "dmg-staging")
+    shutil.rmtree(staging, ignore_errors=True)
+    os.makedirs(staging)
+    shutil.copytree(app, os.path.join(staging, "gitEssay.app"), symlinks=True)
+    os.symlink("/Applications", os.path.join(staging, "Applications"))
+    out = os.path.join(DIST, f"gitessay-{version}-{platform_tag()}.dmg")
+    run(
+        ["hdiutil", "create", "-volname", "gitEssay", "-srcfolder", staging,
+         "-ov", "-format", "UDZO", out],
+        cwd=BACKEND,
+    )
+    if not os.path.isfile(out):
+        die(f"dmg not produced: {out}")
+    write_sha256(out)
+    return out
+
+
+def package(version: str) -> str:
+    if sys.platform == "win32":
+        return make_installer(version)
+    if sys.platform == "darwin":
+        return make_dmg(version)
+    return make_appimage(version)
 
 
 def main() -> None:
@@ -260,9 +398,10 @@ def main() -> None:
 
     if not args.skip_smoke:
         smoke_test()
+        webview_check()
 
     dedupe_hardlinks()
-    out = make_archive(version)
+    out = package(version)
     step("done")
     log(f"built {os.path.relpath(out, REPO)}")
 
