@@ -165,9 +165,16 @@ distro that can run Chrome/Firefox). AppImages also need FUSE 2 at runtime
    prunes docling's transitive `opencv-python`), so the frozen app needs no
    system X11/GL libraries beyond glibc.
 3. **First-run model download**: the first PDF parse downloads ~500 MB of
-   docling layout models (stored in the data dir; offline thereafter). An
-   optional alternative is warming the model cache into the package at build
-   time (+500 MB, fully offline).
+   docling layout models (stored in the data dir; offline thereafter). While
+   it runs the UI shows a dedicated `loading_models` phase ("loading AI
+   models…") instead of a stalled progress bar. If the model cache ever ends
+   up half-written (interrupted download, two app instances racing it, a
+   cleaner tool deleting snapshot pointers), a parse that hits a missing model
+   file now **repairs the HF snapshot pointers and retries once automatically**
+   (`literature_ingest._repair_hf_snapshots`) instead of permanently failing
+   with `FileNotFoundError: Missing safe tensors file`. An optional
+   alternative to downloads is warming the model cache into the package at
+   build time (+500 MB, fully offline).
 4. **Windows antivirus false positives**: common for PyInstaller binaries;
    UPX is already off. For public releases, sign the binaries (Windows
    Authenticode / macOS Developer ID + notarization); unsigned macOS builds

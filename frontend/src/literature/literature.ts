@@ -27,7 +27,7 @@ export type ParseEngine = 'edgeparse' | 'docling' | null;
 export type ParseConfidence = 'none' | 'reliable' | 'partial' | 'unreliable';
 
 /** Live stage of the two-tier PDF parse while status === 'processing'. */
-export type ParsePhase = 'fast_extract' | 'evaluating' | 'ocr_fallback' | null;
+export type ParsePhase = 'fast_extract' | 'evaluating' | 'loading_models' | 'ocr_fallback' | null;
 
 export interface Literature {
   id: string;

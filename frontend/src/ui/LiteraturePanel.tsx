@@ -37,9 +37,11 @@ function statusBadge(lit: Literature): JSX.Element {
         ? 'fast parsing…'
         : lit.parse_phase === 'evaluating'
           ? 'evaluating…'
-          : lit.parse_phase === 'ocr_fallback'
-            ? 'deep OCR parse…'
-            : 'parsing…';
+          : lit.parse_phase === 'loading_models'
+            ? 'loading AI models…'
+            : lit.parse_phase === 'ocr_fallback'
+              ? 'deep OCR parse…'
+              : 'parsing…';
     return <span className="lit-badge lit-badge--processing">{label}</span>;
   }
   if (lit.status === 'error') {

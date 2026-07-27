@@ -356,3 +356,42 @@ def test_sample_chunks_is_bounded():
     sample = parse_eval._sample_chunks(chunks)
     assert len(sample) <= 8
     assert sum(len(c.text) for c in sample) <= parse_eval._SAMPLE_CHAR_CAP
+
+
+# --- docling model-cache self-heal --------------------------------------------------
+def test_extract_repairs_missing_model_files_once(monkeypatch):
+    """A FileNotFoundError from model loading (broken HF snapshot pointers)
+    triggers one cache repair + retry, then succeeds."""
+    calls = {"extract": 0, "repair": 0}
+
+    def flaky(path, filename, on_progress=None, on_models_ready=None, **_):
+        calls["extract"] += 1
+        if calls["extract"] == 1:
+            raise FileNotFoundError("Missing safe tensors file: /x/model.safetensors")
+        return ExtractedDoc(
+            title="Healed", page_count=1, chunks=[ExtractedChunk("h", "body text")]
+        )
+
+    monkeypatch.setattr(literature_ingest, "_extract_once", flaky)
+    monkeypatch.setattr(
+        literature_ingest,
+        "_repair_hf_snapshots",
+        lambda: calls.__setitem__("repair", calls["repair"] + 1),
+    )
+
+    doc = literature_ingest._extract("x.pdf", "x.pdf")
+    assert doc.title == "Healed"
+    assert calls == {"extract": 2, "repair": 1}
+
+
+def test_extract_repair_failure_still_propagates(monkeypatch):
+    """If the post-repair retry ALSO hits a missing file, the error surfaces
+    instead of looping."""
+    monkeypatch.setattr(
+        literature_ingest,
+        "_extract_once",
+        lambda *a, **_: (_ for _ in ()).throw(FileNotFoundError("still missing")),
+    )
+    monkeypatch.setattr(literature_ingest, "_repair_hf_snapshots", lambda: None)
+    with pytest.raises(FileNotFoundError):
+        literature_ingest._extract("x.pdf", "x.pdf")

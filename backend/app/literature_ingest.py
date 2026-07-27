@@ -19,6 +19,7 @@ import os
 import shutil
 import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
@@ -146,15 +147,61 @@ def _collect(doc, filename: str) -> tuple[str, list, list]:
     return title, raw, images
 
 
-def _extract(path: str, filename: str, on_progress=None) -> ExtractedDoc:
+def _repair_hf_snapshots() -> None:
+    """Delete HF hub snapshot POINTER dirs (blobs are kept) so the next
+    snapshot_download recreates them from the local blobs — instant for a
+    complete cache, re-downloading only what is genuinely missing.
+
+    Docling's layout/table models load straight from the snapshot dir, which
+    can lose files while the blobs stay intact (an interrupted first download,
+    two app instances racing the cache, an over-eager cleaner tool). Every
+    parse then dies with FileNotFoundError ("Missing safe tensors file") until
+    the pointers are rebuilt."""
+    from huggingface_hub.constants import HF_HUB_CACHE  # noqa: PLC0415
+
+    for snapshots in Path(HF_HUB_CACHE).glob("models--*/snapshots"):
+        log.warning("repairing HF cache: removing stale snapshot dir %s", snapshots)
+        shutil.rmtree(snapshots, ignore_errors=True)
+
+
+def _extract(path: str, filename: str, on_progress=None, on_models_ready=None) -> ExtractedDoc:
+    """Convert one file with docling (work in `_extract_once`). Self-heals a
+    broken HF model cache ONCE: a FileNotFoundError from model loading triggers
+    a snapshot-pointer repair + converter rebuild + one retry, instead of
+    failing the document outright. Remains the testable seam — tests
+    monkeypatch this name."""
+    try:
+        return _extract_once(path, filename, on_progress, on_models_ready)
+    except FileNotFoundError:
+        log.warning(
+            "docling model file missing — repairing HF snapshot cache and "
+            "retrying the parse of %s",
+            filename,
+            exc_info=True,
+        )
+        _repair_hf_snapshots()
+        global _converter
+        with _converter_lock:
+            _converter = None
+        return _extract_once(path, filename, on_progress, on_models_ready)
+
+
+def _extract_once(path: str, filename: str, on_progress=None, on_models_ready=None) -> ExtractedDoc:
     """Convert one file with docling. Slow + model-heavy on first call; run
     off the request thread. Serialized: torch isn't thread-safe.
 
     PDFs convert in _SEGMENT_PAGES-sized page segments; `on_progress(done_pages,
     total_pages)` fires after each segment (real progress for the UI). DOCX
     converts in one shot (no page concept → progress stays indeterminate).
+    `on_models_ready()` fires once the converter (imports + model download) is
+    up, so the UI can switch from "loading models" to the real progress bar.
     """
     converter = _get_converter()
+    if on_models_ready is not None:
+        try:
+            on_models_ready()
+        except Exception:  # noqa: BLE001 — phase reporting is best-effort
+            log.debug("on_models_ready callback failed", exc_info=True)
     total = _page_count(path)
     segments: list[tuple[int, int] | None] = (
         [(s, min(s + _SEGMENT_PAGES - 1, total)) for s in range(1, total + 1, _SEGMENT_PAGES)]
@@ -291,12 +338,20 @@ def _extract_pdf_tiered(db: Session, lit: Literature, path: str, progress_frac) 
             )
 
     lo = 0.05 if forced else 0.4
-    _phase("ocr_fallback", lo)
+    # The first docling run imports torch AND may download ~500 MB of layout
+    # models — minutes with no page progress. Give that stall its own phase so
+    # the UI says what's happening instead of looking stuck at 40%.
+    _phase("loading_models", lo)
 
     def _scaled(done: int, total: int) -> None:
         progress_frac(min(lo + (1.0 - lo) * (done / total), 1.0) if total else None)
 
-    extracted = _extract(path, lit.filename, on_progress=_scaled)
+    extracted = _extract(
+        path,
+        lit.filename,
+        on_progress=_scaled,
+        on_models_ready=lambda: _phase("ocr_fallback", lo),
+    )
     res2 = evaluate_parse(db, extracted.chunks, extracted.page_count, lit.filename)
     lit.parse_engine = "docling"
     lit.parse_confidence = res2.verdict
