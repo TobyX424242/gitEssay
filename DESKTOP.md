@@ -125,12 +125,15 @@ packages and their checksums; pushes to `main` run the same matrix as a
 validation build (artifacts only, no Release).
 
 Linux notes: the AppImage bundles Qt WebEngine (pywebview's Qt backend) so
-the window never needs system WebKitGTK or a browser, but Qt still expects
-common desktop shared libs on the host (libEGL/libGL, libnss3, libxkbcommon,
-libxcb — present on any distro that can run Chrome/Firefox). AppImages also
-need FUSE 2 at runtime (`--appimage-extract-and-run` works without it).
-Built on ubuntu-latest (glibc 2.39), so distros older than ~2024 are
-unsupported.
+the window never needs system WebKitGTK or a browser. It also bundles
+`libxcb-cursor.so.0` (Qt ≥ 6.5 hard-requires it for the xcb plugin, but
+ubuntu-latest build runners don't ship it — the spec resolves it from the
+build machine or the vendored fallback in `backend/assets/libs/` and FAILS
+the build if neither has it). Qt still expects common desktop shared libs on
+the host (libEGL/libGL, libnss3, libxkbcommon, libxcb — present on any
+distro that can run Chrome/Firefox). AppImages also need FUSE 2 at runtime
+(`--appimage-extract-and-run` works without it). Built on ubuntu-latest
+(glibc 2.39), so distros older than ~2024 are unsupported.
 
 ## Risks and caveats
 

@@ -112,6 +112,30 @@ a = Analysis(
 )
 a.datas = [d for d in a.datas if not _drop_payload(d[0])]
 a.binaries = [b for b in a.binaries if not _drop_payload(b[0])]
+
+# Qt >= 6.5 links libxcb-cursor.so.0 into the xcb platform plugin — without it
+# libqxcb fails to load on end-user machines ("xcb-cursor0 or libxcb-cursor0
+# is needed to load the Qt xcb platform plugin"). PyInstaller's dependency
+# walker only collects it when the BUILD machine has it installed
+# (ubuntu-latest doesn't), so resolve it explicitly: system lib first, then
+# the vendored fallback in assets/libs — and fail the build loudly if neither
+# exists, instead of shipping an AppImage whose window can't start.
+if sys.platform == "linux":
+    soname = "libxcb-cursor.so.0"
+    if not any(b[0] == soname for b in a.binaries):
+        candidates = [
+            os.path.join("assets", "libs", soname),
+            f"/usr/lib/x86_64-linux-gnu/{soname}",
+            f"/usr/lib64/{soname}",
+            f"/usr/lib/{soname}",
+        ]
+        src = next((c for c in candidates if os.path.exists(c)), None)
+        if src is None:
+            raise SystemExit(
+                f"{soname} not found — `apt install libxcb-cursor0` (or drop the "
+                "lib into backend/assets/libs/) or the AppImage's window won't start"
+            )
+        a.binaries.append((soname, os.path.realpath(src), "BINARY"))
 pyz = PYZ(a.pure)
 
 # Bootloader-level splash: shown by the PyInstaller bootloader itself, BEFORE
