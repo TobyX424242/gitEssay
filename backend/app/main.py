@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from app.db import Base, SessionLocal, engine
 from app.literature_ingest import start_ingest
@@ -228,6 +229,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Checkpoint states / conversation histories are large, highly compressible
+# JSON. Starlette's GZipMiddleware compresses streaming responses chunk-by-
+# chunk (flush per message), so the agent SSE stream stays live.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.include_router(projects.router, prefix="/api")
 app.include_router(checkpoints.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
@@ -243,8 +248,18 @@ _frontend_build = os.environ.get("GITESSAY_FRONTEND_BUILD")
 if _frontend_build and os.path.isdir(_frontend_build):
     from fastapi.staticfiles import StaticFiles
 
+    class _CachedStaticFiles(StaticFiles):
+        """Hashed /assets chunks are immutable (same rule as the docker
+        nginx.conf); everything else (index.html) revalidates via ETag."""
+
+        async def get_response(self, path: str, scope):
+            response = await super().get_response(path, scope)
+            if path.startswith("assets/"):
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return response
+
     # Mounted after the /api routers, so API routes still match first.
-    app.mount("/", StaticFiles(directory=_frontend_build, html=True), name="frontend")
+    app.mount("/", _CachedStaticFiles(directory=_frontend_build, html=True), name="frontend")
 else:
 
     @app.get("/")

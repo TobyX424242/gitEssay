@@ -27,14 +27,14 @@ import {LexicalExtensionComposer} from '@lexical/react/LexicalExtensionComposer'
 import {RichTextExtension} from '@lexical/rich-text';
 import {TableExtension} from '@lexical/table';
 import {configExtension, defineExtension} from 'lexical';
-import {type JSX, useEffect} from 'react';
+import {type JSX, Suspense, useEffect} from 'react';
 
 import {loadAISettings} from './rewrite/aiSettings';
 import {loadProjects} from './projects/projectStore';
 import LiteratureDropZone from './literature/LiteratureDropZone';
 import {ToolbarContext} from './context/ToolbarContext';
-import ChatSidebar from './chat/ChatSidebar';
 import Editor from './Editor';
+import {lazyWithRetry} from './utils/lazyWithRetry';
 import AppActionBar from './ui/AppActionBar';
 import CheckpointsSidebar from './ui/CheckpointsSidebar';
 import {CompareModeProvider} from './ui/CompareMode';
@@ -117,6 +117,12 @@ const appExtension = /* @__PURE__ */ defineExtension({
   name: 'gitEssay/root',
 });
 
+// Lazy: the chat sidebar is collapsed on first paint, and it pulls in the
+// whole markdown/katex rendering stack (react-markdown, remark, rehype-katex,
+// micromark) — keeping it out of the entry chunk shrinks first load
+// considerably. lazyWithRetry reloads once if the chunk 404s after a deploy.
+const ChatSidebar = lazyWithRetry(() => import('./chat/ChatSidebar'));
+
 export default function App(): JSX.Element {
   // Load the project list (+ resolve active) and AI settings from the backend.
   useEffect(() => {
@@ -133,7 +139,9 @@ export default function App(): JSX.Element {
             <Editor />
           </div>
           <CheckpointsSidebar />
-          <ChatSidebar />
+          <Suspense fallback={null}>
+            <ChatSidebar />
+          </Suspense>
           <LiteratureDropZone />
         </CompareModeProvider>
       </ToolbarContext>

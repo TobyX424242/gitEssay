@@ -15,7 +15,7 @@ import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from app import schemas
 from app.db import get_db
@@ -70,8 +70,11 @@ def _enforce_retention(db: Session, pid: str, current_id: Optional[str]) -> None
     touches the init baseline or the current pointer. parent_id is not read
     anywhere, so deleting a node mid-chain (leaving a dangling parent ref on
     its children) is harmless."""
+    # defer(Checkpoint.state): pruning only needs id/source/ordering — the state column
+    # holds the full Lexical JSON (MBs per row for long documents).
     durables = (
         db.query(Checkpoint)
+        .options(defer(Checkpoint.state))
         .filter(Checkpoint.project_id == pid, Checkpoint.source != "auto")
         .order_by(Checkpoint.created_at.asc(), Checkpoint.id.asc())
         .all()
@@ -89,8 +92,11 @@ def _enforce_retention(db: Session, pid: str, current_id: Optional[str]) -> None
 @router.get("/projects/{pid}/checkpoints", response_model=list[schemas.CheckpointMeta])
 def list_checkpoints(pid: str, db: Session = Depends(get_db)):
     get_project_or_404(db, pid)
+    # defer(Checkpoint.state): to_meta never reads state — skip loading MBs of Lexical
+    # JSON per row just to render the metadata list.
     rows = (
         db.query(Checkpoint)
+        .options(defer(Checkpoint.state))
         .filter_by(project_id=pid)
         .order_by(Checkpoint.created_at.desc(), Checkpoint.id.desc())
         .all()
