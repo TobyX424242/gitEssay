@@ -29,7 +29,7 @@ import {
   useActiveProject,
 } from '../projects/projectStore';
 import {docFromHash} from '../utils/docSerialization';
-import {exportDocumentAsPdf} from '../utils/pdfExport';
+import PdfExportDialog from '../ui/PdfExportDialog';
 import Button from './Button';
 import {DialogActions} from './Dialog';
 import {useSidePanel} from './sidePanelStore';
@@ -214,13 +214,18 @@ export default function AppActionBar(): JSX.Element {
                     },
                     {
                       label: 'PDF (.pdf)',
-                      desc: 'A printable snapshot of this document.',
+                      desc: 'A rendered PDF of this document — header, footer and page numbers configurable.',
                       disabled: isEditorEmpty,
                       onSelect: () =>
-                        exportDocumentAsPdf(
-                          editor,
-                          activeProject?.name ?? 'gitEssay document',
-                        ),
+                        showModal('Export as PDF', onClose2 => (
+                          <PdfExportDialog
+                            editor={editor}
+                            documentName={
+                              activeProject?.name ?? 'gitEssay document'
+                            }
+                            onClose={onClose2}
+                          />
+                        )),
                     },
                     {
                       label: 'Project archive (.zip)',

@@ -32,6 +32,8 @@ dependencies = [
     "keyring>=25",
     # Exponential-backoff retries for transient LLM gateway failures (ai.py).
     "tenacity>=9",
+    "weasyprint>=62",
+    "brotli>=1.1",
 ]
 
 [dependency-groups]

@@ -30,7 +30,14 @@ from app.models import (
     now_ms,
 )
 from app.routers import ai as ai_router
-from app.routers import checkpoints, conversations, literature, memories, projects
+from app.routers import (
+    checkpoints,
+    conversations,
+    literature,
+    memories,
+    pdf_export,
+    projects,
+)
 
 
 def _seed() -> None:
@@ -241,6 +248,7 @@ app.add_middleware(
 # chunk (flush per message), so the agent SSE stream stays live.
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.include_router(projects.router, prefix="/api")
+app.include_router(pdf_export.router, prefix="/api")
 app.include_router(checkpoints.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
 app.include_router(memories.router, prefix="/api")

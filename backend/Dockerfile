@@ -44,8 +44,14 @@ RUN uv sync --frozen --no-install-project --no-dev --no-cache
 # docling's table-structure model imports cv2 (full opencv-python, not
 # headless), which needs these system libs that python:*-slim omits — without
 # them every PDF fails with "ImportError: libxcb.so.1".
+# The pango/fontconfig/fonts set is for WeasyPrint (server-side PDF export,
+# /api/export/pdf): pango+harfbuzz do the text layout, fontconfig finds the
+# fonts, DejaVu covers Latin and Noto CJK covers CJK document content.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libxcb1 \
+    && apt-get install -y --no-install-recommends \
+       libgl1 libglib2.0-0 libxcb1 \
+       libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b fontconfig \
+       fonts-dejavu-core fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 # Bake ALL docling models into the image via a REAL warm-up conversion with the

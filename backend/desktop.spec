@@ -80,6 +80,19 @@ EXCLUDES = [
     "hf_xet",
     # zstandard loads backend_c (C extension); _cffi is the unused fallback.
     "zstandard._cffi",
+    # WeasyPrint (server-side PDF export) needs system Pango/Fontconfig, which
+    # can't be relied on outside the Docker image — the export route imports it
+    # lazily and answers 501, and the frontend falls back to the browser print
+    # flow. Exclude it (and its exclusive deps) from the frozen build instead
+    # of shipping ~15 MB that can never work there. Its exclusive deps
+    # (fontTools/Brotli/zopfli) are only reachable through it, so modulegraph
+    # never pulls them in once it is excluded.
+    "weasyprint",
+    "pydyf",
+    "tinycss2",
+    "tinyhtml5",
+    "cssselect2",
+    "pyphen",
 ]
 
 # Payload files (not Python modules) dropped after analysis:
