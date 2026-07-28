@@ -187,7 +187,12 @@ function TableCellResizer({editor}: {editor: LexicalEditor}): JSX.Element {
 
     return () => {
       removeRootListener();
-      resizerContainer?.removeEventListener('pointermove', onPointerMove);
+      // Must pass the same capture flag as addEventListener above — without it
+      // the removal never matches and a duplicate listener accumulates on
+      // every effect re-run (each firing per pointermove).
+      resizerContainer?.removeEventListener('pointermove', onPointerMove, {
+        capture: true,
+      });
     };
   }, [activeCell, draggingDirection, editor, resetState, hasTable]);
 

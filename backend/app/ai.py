@@ -9,6 +9,8 @@ call_model(...) is the blocking single-shot surface, used by /ai/test and the
 literature summarizer. The chat agent runs through LangGraph (agent_graph.py,
 via langchain) and does not use this module.
 """
+import logging
+
 import httpx
 from tenacity import (
     retry,
@@ -16,6 +18,17 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
 )
+
+log = logging.getLogger(__name__)
+
+
+def _sanitize_http_error(r: httpx.Response) -> str:
+    """Never reflect the upstream error BODY to API callers: some providers
+    echo request details (internal URLs, occasionally header material) in 4xx
+    bodies, and /ai/test returns this message verbatim. Log the body
+    server-side for debugging; return the status line only."""
+    log.warning("LLM upstream HTTP %s: %s", r.status_code, r.text[:1000])
+    return f"upstream HTTP {r.status_code} ({r.reason_phrase or 'error'})"
 
 
 class ModelEmptyResponse(RuntimeError):
@@ -98,7 +111,7 @@ def _should_retry(e: BaseException) -> bool:
 def _post(url: str, **kwargs) -> httpx.Response:
     r = httpx.post(url, timeout=180, **kwargs)
     if r.status_code in (408, 425, 429) or r.status_code >= 500:
-        raise _RetryableHTTP(f"HTTP {r.status_code}: {r.text[:500]}")
+        raise _RetryableHTTP(_sanitize_http_error(r))
     return r
 
 
@@ -139,7 +152,7 @@ def _openai(s, system: str, user: str) -> str:
         headers={"Authorization": f"Bearer {s.api_key}"},
     )
     if r.status_code >= 400:
-        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:500]}")
+        raise RuntimeError(_sanitize_http_error(r))
     data = r.json()
     choices = data.get("choices") or []
     content = (((choices[0] if choices else {}).get("message") or {}).get("content"))
@@ -164,7 +177,7 @@ def _anthropic(s, system: str, user: str) -> str:
         headers={"x-api-key": s.api_key, "anthropic-version": "2023-06-01"},
     )
     if r.status_code >= 400:
-        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:500]}")
+        raise RuntimeError(_sanitize_http_error(r))
     data = r.json()
     blocks = data.get("content") or []
     content = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")

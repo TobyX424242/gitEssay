@@ -73,7 +73,9 @@ export default function DraggableBlockPlugin({
       return baseOptions;
     }
 
-    const regex = new RegExp(queryString, 'i');
+    // Escape user input before compiling it — a raw `[`, `(`, `\` etc. would
+    // throw SyntaxError during render and crash to the root ErrorBoundary.
+    const regex = new RegExp(queryString.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     return [
       ...getDynamicOptions(editor, queryString),
       ...baseOptions.filter(

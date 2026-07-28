@@ -38,7 +38,11 @@ services:
     build: ./frontend
     container_name: gitessay-frontend
     ports:
-      - "5180:80" # http://localhost:5180
+      # Loopback only: the API is unauthenticated (single-user local app), so
+      # publishing on all interfaces would expose project export/delete and
+      # LLM-quota endpoints to the LAN. Remove the 127.0.0.1 prefix only if
+      # you understand that trade-off.
+      - "127.0.0.1:5180:80" # http://localhost:5180
     depends_on:
       backend:
         condition: service_healthy

@@ -87,6 +87,21 @@ def put_settings(body: schemas.AISettingsIn, db: Session = Depends(get_db)):
 def test_connection(body: schemas.AISettingsIn, db: Session = Depends(get_db)):
     s = _settings(db)
     overrides = body.model_dump(exclude_none=True)
+    # Never send the STORED key to a DIFFERENT base_url: this endpoint is
+    # unauthenticated, so a base_url override + the implicit stored key would
+    # let anyone who can reach the API exfiltrate the key to their own server.
+    # Testing a different endpoint requires typing the key explicitly.
+    if "api_key" not in overrides:
+        stored_url = (s.base_url or "").rstrip("/")
+        requested_url = (overrides.get("base_url") or s.base_url or "").rstrip("/")
+        if requested_url != stored_url:
+            return {
+                "ok": False,
+                "message": (
+                    "Re-enter the API key to test a different base URL — the "
+                    "stored key is never sent to an endpoint it wasn't saved for."
+                ),
+            }
     # Build a transient settings object with the overrides applied.
     merged = type("S", (), {})()
     for attr in ("provider_format", "base_url", "api_key", "model",

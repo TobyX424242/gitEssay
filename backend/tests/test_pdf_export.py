@@ -77,3 +77,34 @@ def test_export_pdf_with_inlined_data_urls(client):
     r = client.post("/api/export/pdf", json={"html": html, "filename": "x.pdf"})
     assert r.status_code == 200, r.text
     assert r.content.startswith(b"%PDF-")
+
+
+def test_export_pdf_blocks_non_data_urls(client, caplog):
+    """SSRF/LFI guard: the url_fetcher must refuse http:/file:/ftp: resources.
+    WeasyPrint catches fetcher errors internally and skips the resource, so
+    the render still succeeds — but nothing external may be fetched."""
+    import logging
+
+    from app.routers.pdf_export import _data_only_url_fetcher
+
+    # Unit-level: non-data schemes raise, data: passes through.
+    fetcher = _data_only_url_fetcher()
+    with pytest.raises(ValueError):
+        fetcher("file:///etc/passwd")
+    with pytest.raises(ValueError):
+        fetcher("http://169.254.169.254/latest/meta-data")
+    assert fetcher("data:image/png;base64,iVBORw0KGgo=") is not None
+
+    # End-to-end: hostile HTML still renders (resource skipped), and the
+    # blocked fetch is logged rather than silently fetched.
+    html = (
+        '<!DOCTYPE html><html><body><p>ok</p>'
+        '<img src="file:///etc/passwd">'
+        '<img src="http://169.254.169.254/latest/meta-data">'
+        "</body></html>"
+    )
+    with caplog.at_level(logging.WARNING):
+        r = client.post("/api/export/pdf", json={"html": html, "filename": "x.pdf"})
+    assert r.status_code == 200, r.text
+    assert r.content.startswith(b"%PDF-")
+    assert "disallowed protocol" in caplog.text

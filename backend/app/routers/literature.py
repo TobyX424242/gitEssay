@@ -31,7 +31,7 @@ from app.models import (
     new_id,
     now_ms,
 )
-from app.storage import abs_path, literature_dir
+from app.storage import DATA_DIR, abs_path, literature_dir
 
 router = APIRouter(tags=["literature"])
 
@@ -252,6 +252,11 @@ def get_literature_image(lid: str, seq: int, db: Session = Depends(get_db)):
     if img is None:
         raise HTTPException(status_code=404, detail="image not found")
     path = abs_path(img.path)
+    # Defense in depth: img.path is DB-stored relative to DATA_DIR — never
+    # serve anything that resolves outside it (e.g. a path planted by a
+    # crafted import archive before _safe_image_file existed).
+    if os.path.commonpath([os.path.realpath(path), os.path.realpath(DATA_DIR)]) != os.path.realpath(DATA_DIR):
+        raise HTTPException(status_code=404, detail="image not found")
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="image file missing")
     return FileResponse(path, media_type="image/png")

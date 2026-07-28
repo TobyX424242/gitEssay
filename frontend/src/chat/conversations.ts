@@ -188,21 +188,27 @@ export function useConversations(): ConversationsData {
       return;
     }
     let alive = true;
-    listConversations(activeProjectId).then(list => {
-      if (!alive) {
-        return;
-      }
-      const stored = activeProject?.active_conversation_id;
-      const activeId =
-        stored && list.some(c => c.id === stored)
-          ? stored
-          : (list[0]?.id ?? null);
-      setData({
-        conversations: list,
-        activeId,
-        active: list.find(c => c.id === activeId) ?? null,
+    listConversations(activeProjectId)
+      .then(list => {
+        if (!alive) {
+          return;
+        }
+        const stored = activeProject?.active_conversation_id;
+        const activeId =
+          stored && list.some(c => c.id === stored)
+            ? stored
+            : (list[0]?.id ?? null);
+        setData({
+          conversations: list,
+          activeId,
+          active: list.find(c => c.id === activeId) ?? null,
+        });
+      })
+      .catch(() => {
+        // Keep showing the last good list on a transient fetch failure — the
+        // next emit()/effect re-run recovers on its own (same pattern as
+        // useLiterature/useMemories).
       });
-    });
     return () => {
       alive = false;
     };

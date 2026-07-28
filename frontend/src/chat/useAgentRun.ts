@@ -114,21 +114,27 @@ export function useAgentRun({
       // Pin a retry's target into view (live stream + finalized patch card); a
       // fresh send has no pin, so it scrolls to the bottom as usual.
       pinnedIdRef.current = args.replace ? args.streamingId : null;
-      setRuns(rs => ({
-        ...rs,
-        [args.convId]: {
-          controller,
-          message: {
-            id: args.streamingId,
-            role: 'assistant',
-            text: '',
-            mode: args.mode,
-            streaming: true,
-            steps: [],
-            action: null,
-          },
+      const entry: RunEntry = {
+        controller,
+        message: {
+          id: args.streamingId,
+          role: 'assistant',
+          text: '',
+          mode: args.mode,
+          streaming: true,
+          steps: [],
+          action: null,
         },
-      }));
+      };
+      // Supersede any in-flight run for this conversation: two sends can slip
+      // past the `loading` guard while the first still persists its user
+      // message (await appendMessages). Abort the old run (stops the stream +
+      // token burn) and take the slot SYNCHRONOUSLY via runsRef so the old
+      // run's persist path sees it is stale and drops its result instead of
+      // appending a duplicate assistant message.
+      runsRef.current[args.convId]?.controller.abort();
+      runsRef.current = {...runsRef.current, [args.convId]: entry};
+      setRuns(rs => ({...rs, [args.convId]: entry}));
       // Merge into THIS run's bubble only — a stale update (entry replaced by
       // a newer run in the same conversation, or the run already finished)
       // is dropped, never clobbers another conversation's bubble.
@@ -285,6 +291,11 @@ export function useAgentRun({
       runOnce(history, args.instruction)
         .then(m => finalize(m, history, args.instruction))
         .then(async (finalMsg: ChatMessage) => {
+          // Superseded by a newer run in this conversation while this one
+          // settled — drop the stale result, never persist a duplicate.
+          if (runsRef.current[args.convId]?.controller !== controller) {
+            return;
+          }
           const persisted: ChatMessage = {...finalMsg, id: args.streamingId};
           // Await the persist so the store holds the new message BEFORE we drop
           // the live streaming bubble — otherwise the non-optimistic refetch
@@ -298,6 +309,9 @@ export function useAgentRun({
           }
         })
         .catch((err: unknown) => {
+          if (runsRef.current[args.convId]?.controller !== controller) {
+            return; // superseded — the error belongs to the dropped run
+          }
           const errMsg = err instanceof Error ? err.message : String(err);
           const errNode: ChatMessage = {
             id: args.streamingId,
@@ -315,6 +329,11 @@ export function useAgentRun({
         .finally(() => {
           // Drop this run's entry — but only if it is still THIS run (a newer
           // run may have taken the conversation's slot while this one settled).
+          if (runsRef.current[args.convId]?.controller === controller) {
+            const next = {...runsRef.current};
+            delete next[args.convId];
+            runsRef.current = next;
+          }
           setRuns(rs => {
             const r = rs[args.convId];
             if (!r || r.controller !== controller) {

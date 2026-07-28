@@ -34,6 +34,20 @@ class PdfExportRequest(BaseModel):
     filename: str = Field(default="document.pdf", max_length=255)
 
 
+def _data_only_url_fetcher():
+    """SSRF/LFI guard: the frontend inlines every asset (fonts, images) as a
+    data: URL, so every other scheme — http(s):, file:, ftp: — is rejected.
+    WeasyPrint's default URLFetcher allows ALL protocols (incl. file://) and
+    follows redirects, which would let a request to this unauthenticated
+    endpoint fetch arbitrary URLs (SSRF, e.g. cloud metadata endpoints) or
+    embed local files into the PDF. Blocked resources raise ValueError, which
+    WeasyPrint catches internally — the resource is skipped with a warning
+    instead of failing the render."""
+    from weasyprint.urls import URLFetcher
+
+    return URLFetcher(allowed_protocols=("data",))
+
+
 @router.post("/export/pdf")
 def export_pdf(body: PdfExportRequest) -> Response:
     try:
@@ -45,7 +59,7 @@ def export_pdf(body: PdfExportRequest) -> Response:
             detail="Server-side PDF rendering is not available on this installation.",
         ) from exc
     try:
-        pdf = HTML(string=body.html).write_pdf()
+        pdf = HTML(string=body.html, url_fetcher=_data_only_url_fetcher()).write_pdf()
     except Exception as exc:  # noqa: BLE001 — surface a clean error, not a traceback page
         log.exception("PDF rendering failed")
         raise HTTPException(status_code=500, detail=f"PDF rendering failed: {exc}") from exc

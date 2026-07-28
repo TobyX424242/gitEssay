@@ -56,6 +56,23 @@ class ArchiveError(ValueError):
     """Malformed / unsupported archive — surfaced as HTTP 400."""
 
 
+def _safe_image_file(name) -> str:
+    """Validate an images.json `file` value from an untrusted archive.
+
+    The value lands verbatim in LiteratureImage.path and is later served by
+    GET /literature/{lid}/images/{seq} — a crafted archive with a value like
+    `../../../../etc/passwd` would read arbitrary local files (the zip-slip
+    guard only covers archive ENTRY names, not JSON content). Keep only plain
+    basenames. (os.path.basename on POSIX does not split `\\`, so check it
+    explicitly.)
+    """
+    if not isinstance(name, str) or not name:
+        raise ArchiveError("images.json entry missing 'file'")
+    if name in (".", "..") or name != os.path.basename(name) or "\\" in name:
+        raise ArchiveError(f"unsafe image path in archive: {name!r}")
+    return name
+
+
 # --- export ------------------------------------------------------------------
 def build_export_zip(db: Session, project: Project) -> bytes:
     buf = io.BytesIO()
@@ -390,7 +407,7 @@ def import_archive(db: Session, data: bytes) -> Project:
                         literature_id=lid,
                         seq=im.get("seq") or 0,
                         caption=im.get("caption") or "",
-                        path=literature_rel_path(lid, "images", im.get("file") or ""),
+                        path=literature_rel_path(lid, "images", _safe_image_file(im.get("file"))),
                         width=im.get("width") or 0,
                         height=im.get("height") or 0,
                     )

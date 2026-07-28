@@ -8,7 +8,7 @@
  * is in flight.
  */
 import type {LexicalEditor} from 'lexical';
-import {useCallback, useState} from 'react';
+import {useCallback, useRef, useState} from 'react';
 
 import {appendMessages, type Conversation} from './conversations';
 import {deriveTitle, msgId} from './chatUtils';
@@ -40,6 +40,11 @@ export function useSendMessage({
   send: (instruction?: string) => void;
 } {
   const [input, setInput] = useState('');
+  // Synchronous in-flight guard: `loading` only flips true on the re-render
+  // AFTER the run starts, so without this two quick sends (e.g. double-clicking
+  // a quick-action chip) both pass the guard while the first is still awaiting
+  // appendMessages — the second run then supersedes and kills the first.
+  const sendingRef = useRef(false);
 
   const captureSelection = useCallback(
     (instruction: string): SendContext => {
@@ -58,9 +63,17 @@ export function useSendMessage({
   const send = useCallback(
     (instruction?: string) => {
       const text = (instruction ?? input).trim();
-      if (!text || loading || !active || pendingRetry || acceptingRef.current) {
+      if (
+        !text ||
+        loading ||
+        sendingRef.current ||
+        !active ||
+        pendingRetry ||
+        acceptingRef.current
+      ) {
         return;
       }
+      sendingRef.current = true;
       const convId = active.id;
       const priorMessages = active.messages;
       const ctx = captureSelection(text);
@@ -78,16 +91,26 @@ export function useSendMessage({
       // (`void appendMessages(...); startRun(...)`) races the streaming
       // persist and can silently drop the message.
       void (async () => {
-        await appendMessages(convId, [userMsg], title);
-        startRun({
-          convId,
-          instruction: text,
-          mode: ctx.mode,
-          selectionText: ctx.selectionText,
-          priorMessages,
-          streamingId: msgId(),
-          replace: false,
-        });
+        try {
+          await appendMessages(convId, [userMsg], title);
+          startRun({
+            convId,
+            instruction: text,
+            mode: ctx.mode,
+            selectionText: ctx.selectionText,
+            priorMessages,
+            streamingId: msgId(),
+            replace: false,
+          });
+        } catch (err) {
+          // The persist failed (backend down): put the instruction BACK in the
+          // composer so the user's typed text is never silently lost, and log
+          // the cause (there is no persisted place to surface it offline).
+          console.error('send failed — restoring composer text:', err);
+          setInput(text);
+        } finally {
+          sendingRef.current = false;
+        }
       })();
     },
     [active, captureSelection, input, loading, pendingRetry, startRun, acceptingRef],

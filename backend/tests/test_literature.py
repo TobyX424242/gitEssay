@@ -296,3 +296,31 @@ def test_real_docling_parses_pdf(client, project, db, tmp_path, monkeypatch):
     detail = client.get(f"/api/literature/{lid}").json()
     assert detail["status"] == "ready"
     assert detail["chunk_count"] > 0
+
+
+def test_search_never_leaks_across_projects(client, db, project, ready_lit):
+    """The FTS path must scope by project: a second project's paper matching the
+    query must not appear in this project's results (the hydration query
+    filters chunk ids only, so scoping has to happen in the ranking)."""
+    other = client.post("/api/projects", json={"name": "Other project"}).json()
+    other_lit = Literature(
+        id="other-lit", project_id=other["id"], filename="o.pdf", title="Other Paper",
+        status="ready", created_at=1,
+    )
+    other_chunk = LiteratureChunk(
+        id="other-chunk", literature_id="other-lit", seq=0,
+        heading="1 Intro", text="multi-head self-attention in another project",
+    )
+    db.add_all([other_lit, other_chunk])
+    db.commit()
+    if literature_search.fts_enabled():
+        literature_search.index_chunk_fts(
+            db, "other-lit", "other-chunk", "1 Intro", other_chunk.text
+        )
+        db.commit()
+    hits = search_chunks(db, project["id"], "multi-head self-attention")
+    assert hits, "expected this project's own hit"
+    assert all(h.literature_id == ready_lit["id"] for h in hits)
+    # ...and the other project DOES find its own chunk (scoping, not hiding).
+    other_hits = search_chunks(db, other["id"], "multi-head self-attention")
+    assert any(h.literature_id == "other-lit" for h in other_hits)

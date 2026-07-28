@@ -162,3 +162,23 @@ def test_import_rejects_garbage(client, db):
             {"format": "gitessay-project-archive", "version": 1, "project": {"name": "E"}}))
     r = _import(client, buf.getvalue())
     assert r.status_code == 400
+
+
+def test_import_rejects_traversal_in_images_json(client, db):
+    """images.json `file` values are archive-controlled JSON — the zip-slip
+    guard only covers entry names, so a value like `../../etc/passwd` would
+    otherwise land in LiteratureImage.path and be served verbatim (arbitrary
+    local file read). Import must refuse with 400."""
+    old_lid = "lit1"
+    manifest = {"format": "gitessay-project-archive", "version": 1,
+                "project": {"name": "Traversal"}}
+    for bad in ("../../../../etc/passwd", "..\\..\\windows\\win.ini", "images/x.png"):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("manifest.json", json.dumps(manifest))
+            zf.writestr(f"literature/{old_lid}/meta.json",
+                        json.dumps({"filename": "p.pdf", "title": "P"}))
+            zf.writestr(f"literature/{old_lid}/images.json",
+                        json.dumps([{"seq": 0, "file": bad}]))
+        r = _import(client, buf.getvalue())
+        assert r.status_code == 400, f"{bad!r} must be rejected: {r.status_code}"

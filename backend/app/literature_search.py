@@ -128,17 +128,24 @@ def embed_texts(texts: list[str], settings: Optional[AISettings]) -> Optional[li
 
 
 # --- search ---------------------------------------------------------------------
-def _fts_ranking(db: Session, query: str, literature_id: Optional[str]) -> list[str]:
+def _fts_ranking(
+    db: Session, project_id: str, query: str, literature_id: Optional[str]
+) -> list[str]:
     terms = re.findall(r"[\w-]+", query, flags=re.UNICODE)[:10]
     if not terms:
         return []
     match = " OR ".join('"' + t.replace('"', '""') + '"' for t in terms)
+    # Project scoping is mandatory: the FTS table holds chunks of EVERY
+    # project, and the hydration query in search_chunks filters chunk ids
+    # only — without this subquery a search would return other projects'
+    # papers (the LIKE/vector paths scope by project already).
     sql = (
         f"SELECT chunk_id FROM {FTS_TABLE} WHERE {FTS_TABLE} MATCH :match"
+        " AND literature_id IN (SELECT id FROM literature WHERE project_id = :pid)"
         + (" AND literature_id = :lid" if literature_id else "")
         + " ORDER BY bm25(" + FTS_TABLE + ") LIMIT :lim"
     )
-    params = {"match": match, "lim": _FTS_CANDIDATES}
+    params = {"match": match, "pid": project_id, "lim": _FTS_CANDIDATES}
     if literature_id:
         params["lid"] = literature_id
     return [r[0] for r in db.execute(text(sql), params).all()]
@@ -217,7 +224,7 @@ def search_chunks(
     """Hybrid search over a project's literature chunks (RRF of keyword +
     semantic rankings; whichever signal is available)."""
     keyword = (
-        _fts_ranking(db, query, literature_id)
+        _fts_ranking(db, project_id, query, literature_id)
         if fts_enabled()
         else _like_ranking(db, project_id, query, literature_id)
     )
