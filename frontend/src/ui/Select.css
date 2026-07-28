@@ -1,42 +1,61 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * gitEssay — themed native <select> (ui/Select).
  *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- *
+ * THEMING RULE (this bug class recurred several times — do not reintroduce):
+ * every color MUST come from the --ge-* theme tokens (themes/darkMode.css),
+ * never hard-coded hex/`white`/light gradients. The old playground version of
+ * this file painted a white gradient with inherited text color, which is
+ * unreadable in dark mode. `.Input__input` (ui/Input.css) and `.cp-input`
+ * (ui/CheckpointsPanel.css) follow the same rule — copy them, not playground
+ * leftovers.
  */
 
+/* Normalize native selects app-wide; the visible box + chevron arrow are
+   painted by the control classes (.select here, .cp-input) since
+   appearance:none removes the native chrome. */
 select {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
-  background-color: transparent;
-  border: none;
-  padding: 0 1em 0 0;
   margin: 0;
+  padding: 0;
   font-family: inherit;
   font-size: inherit;
-  cursor: inherit;
   line-height: inherit;
-
-  z-index: 1;
+  color: inherit;
+  background-color: transparent;
+  border: none;
   outline: none;
 }
 
-:root {
-  --select-border: #393939;
-  --select-focus: #101484;
-  --select-arrow: var(--select-border);
-}
-
 .select {
-  min-width: 160px;
-  max-width: 290px;
-  border: 1px solid var(--select-border);
-  border-radius: 0.25em;
-  padding: 0.25em 0.5em;
-  font-size: 1rem;
-  cursor: pointer;
+  /* Matches .Input__input so selects and text inputs align in the shared
+     .Input__wrapper row (label flex 1 / control flex 2). */
+  flex: 2;
+  min-width: 0;
+  padding: 7px 28px 7px 10px;
+  border: 1px solid var(--ge-border);
+  border-radius: 6px;
+  background-color: var(--ge-surface);
+  color: var(--ge-text);
+  font-size: 14px;
   line-height: 1.4;
-  background: linear-gradient(to bottom, #ffffff 0%, #e5e5e5 100%);
+  cursor: pointer;
+  /* Chevron arrow (appearance:none removes the native one). The stroke color
+     is theme-dependent, so the dark variant overrides the image below. */
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%235a5a5a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 10px 6px;
+}
+.select:focus {
+  outline: 2px solid var(--ge-accent);
+  outline-offset: -1px;
+}
+.select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+[data-theme='dark'] .select {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23b0b0b0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
