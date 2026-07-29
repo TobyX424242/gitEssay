@@ -236,11 +236,18 @@ def _unique_project_name(db: Session, base: str) -> str:
     return f"{base} ({n})"
 
 
-def _read_json(zf: zipfile.ZipFile, name: str, default):
+def _read_json(zf: zipfile.ZipFile, name: str, default, max_bytes: int = 100 * 1024 * 1024):
+    """Read and parse a JSON member. Raises ArchiveError if missing (when default
+    is None), malformed, or exceeds max_bytes (zip-bomb defense)."""
     try:
+        info = zf.getinfo(name)
+        if info.file_size > max_bytes:
+            raise ArchiveError(f"{name} decompressed size ({info.file_size} bytes) exceeds limit ({max_bytes} bytes)")
         with zf.open(name) as fh:
             return json.loads(fh.read().decode("utf-8"))
     except KeyError:
+        if default is None:
+            raise ArchiveError(f"missing required file: {name}")
         return default
     except (UnicodeDecodeError, json.JSONDecodeError) as e:
         raise ArchiveError(f"corrupt {name}: {e}") from e
@@ -255,11 +262,24 @@ def import_archive(db: Session, data: bytes) -> Project:
         zf = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as e:
         raise ArchiveError("not a zip archive") from e
+    
+    # Import ALLOWED_EXTENSIONS and MAX_UPLOAD_BYTES for validation
+    from app.literature_ingest import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES
+    
     with zf:
-        # Zip-slip guard: every entry must stay inside the extraction namespace.
+        # Zip-slip and zip-bomb guards: validate all entries upfront.
+        MAX_TOTAL_DECOMPRESSED = 1024 * 1024 * 1024  # 1 GB total inflated size
+        total_decompressed = 0
+        
         for info in zf.infolist():
+            # Track decompressed size (zip-bomb defense)
+            total_decompressed += info.file_size
+            if total_decompressed > MAX_TOTAL_DECOMPRESSED:
+                raise ArchiveError(f"archive decompressed size exceeds {MAX_TOTAL_DECOMPRESSED // (1024**2)} MB")
+            
+            # Zip-slip guard: no leading /, no .., no empty path segments
             parts = info.filename.replace("\\", "/").split("/")
-            if info.filename.startswith("/") or ".." in parts:
+            if info.filename.startswith("/") or ".." in parts or "" in parts:
                 raise ArchiveError(f"unsafe path in archive: {info.filename!r}")
 
         manifest = _read_json(zf, "manifest.json", None)
@@ -377,10 +397,35 @@ def import_archive(db: Session, data: bytes) -> Project:
                 rel = info.filename[len(prefix):]
                 if rel.endswith(".json"):
                     continue  # metadata, handled explicitly
+                
+                # Validate original.* files: check extension and size (bypass defense).
+                # Extracted images and other derived files are not upload candidates.
+                if rel.startswith("original."):
+                    ext = os.path.splitext(rel)[1].lower()
+                    if ext not in ALLOWED_EXTENSIONS:
+                        raise ArchiveError(f"disallowed file extension in archive: {rel!r} (only {ALLOWED_EXTENSIONS} allowed)")
+                    if info.file_size > MAX_UPLOAD_BYTES:
+                        raise ArchiveError(f"file {rel!r} exceeds upload limit ({MAX_UPLOAD_BYTES // (1024**2)} MB)")
+                
                 dest = os.path.join(target_dir, rel)
+                # Defense in depth: verify dest stays under target_dir even after realpath resolution
+                try:
+                    if os.path.commonpath([os.path.realpath(dest), os.path.realpath(target_dir)]) != os.path.realpath(target_dir):
+                        raise ArchiveError(f"path escape attempt: {info.filename!r}")
+                except ValueError:
+                    # Happens on Windows with cross-drive paths
+                    raise ArchiveError(f"invalid path: {info.filename!r}")
+                
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
+                # Stream the extraction with a size cap (redundant but defense-in-depth)
                 with zf.open(info) as src, open(dest, "wb") as dst:
-                    dst.write(src.read())
+                    remaining = info.file_size
+                    while remaining > 0:
+                        chunk = src.read(min(8192, remaining))
+                        if not chunk:
+                            break
+                        dst.write(chunk)
+                        remaining -= len(chunk)
 
             for ch in _read_json(zf, f"literature/{old_lid}/chunks.json", []):
                 chunk_id = new_id()

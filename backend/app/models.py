@@ -185,6 +185,9 @@ class AISettings(Base):
     # headless Linux) and stays empty otherwise. Access it via the `api_key`
     # property below, never via `_api_key` directly.
     _api_key = Column("api_key", String, nullable=False, default="")
+    # The base_url the key was saved for (key exfiltration defense — prevents
+    # changing base_url without re-entering the key). Empty if no key is set.
+    key_base_url = Column(String, nullable=False, default="")
     model = Column(String, nullable=False, default="gpt-4o-mini")
     temperature = Column(Float, nullable=False, default=0.7)
     max_input_tokens = Column(Integer, nullable=False, default=256000)

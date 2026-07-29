@@ -5,8 +5,18 @@ __pycache__
 *.pyc
 gitessay.db
 gitessay.db-journal
+*.db-wal
+*.db-shm
 .git
 .gitignore
 README.md
 Dockerfile
 .dockerignore
+
+# Build artifacts (7.2 GB untracked dist/, 281 MB build/)
+dist/
+build/
+
+# Test artifacts
+.pytest_cache
+tests/__pycache__

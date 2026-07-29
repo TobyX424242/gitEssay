@@ -76,9 +76,31 @@ def get_settings(db: Session = Depends(get_db)):
 def put_settings(body: schemas.AISettingsIn, db: Session = Depends(get_db)):
     s = _settings(db)
     data = body.model_dump(exclude_none=True)
+    
+    # Key exfiltration defense: if base_url is changing and api_key is not being
+    # re-entered, reject. The stored key must never leave for a different endpoint.
+    if "base_url" in data:
+        new_url = (data["base_url"] or "").rstrip("/")
+        old_url = (s.base_url or "").rstrip("/")
+        has_stored_key = bool(s.api_key)  # checks both keychain and DB fallback
+        if new_url != old_url and has_stored_key and "api_key" not in data:
+            raise HTTPException(
+                status_code=400,
+                detail="Re-enter the API key when changing base_url — the stored key cannot be sent to a different endpoint."
+            )
+    
+    # Apply updates
     for key, value in data.items():
         # api_key=None (omitted) keeps the existing key; "" clears it only if sent.
         setattr(s, key, value)
+    
+    # When setting a new key, bind it to the current base_url
+    if "api_key" in data and data["api_key"]:
+        s.key_base_url = (s.base_url or "").rstrip("/")
+    elif "api_key" in data and not data["api_key"]:
+        # Clearing the key also clears the binding
+        s.key_base_url = ""
+    
     db.commit()
     return _mask(s)
 
@@ -92,7 +114,9 @@ def test_connection(body: schemas.AISettingsIn, db: Session = Depends(get_db)):
     # let anyone who can reach the API exfiltrate the key to their own server.
     # Testing a different endpoint requires typing the key explicitly.
     if "api_key" not in overrides:
-        stored_url = (s.base_url or "").rstrip("/")
+        # Prefer key_base_url if set; fall back to base_url for keys saved before
+        # the key_base_url column existed (migration compatibility).
+        stored_url = (s.key_base_url or s.base_url or "").rstrip("/")
         requested_url = (overrides.get("base_url") or s.base_url or "").rstrip("/")
         if requested_url != stored_url:
             return {

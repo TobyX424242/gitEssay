@@ -85,6 +85,7 @@ def _migrate() -> None:
         "ai_settings": {
             "vision_capable": "BOOLEAN NOT NULL DEFAULT 0",
             "embedding_model": "VARCHAR NOT NULL DEFAULT ''",
+            "key_base_url": "VARCHAR NOT NULL DEFAULT ''",
         },
         "literature": {
             "summary": "TEXT",

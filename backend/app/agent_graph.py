@@ -471,6 +471,7 @@ def build_graph(ctx: RunContext):
         new_steps: list[dict] = []
         read_hits = dict(state.get("read_hits") or {})
         terminal = None
+        extra_messages: list = []  # deferred messages (e.g., vision images from read_figure)
         at = len(state.get("steps") or [])
 
         for call in calls:
@@ -535,7 +536,9 @@ def build_graph(ctx: RunContext):
                 new_steps.append({"kind": "figure", "literature": title or None, "query": f"#{seq}", "at": at})
                 at += 1
                 new_messages.append(ToolMessage(content=text, tool_call_id=tcid))
-                new_messages.extend(extra)
+                # Defer extra messages (vision images) until after all ToolMessages to avoid
+                # breaking OpenAI/Anthropic's message-ordering requirements.
+                extra_messages.extend(extra)
 
             elif name == "read_notes" and ctx.memory_enabled:
                 text = _read_notes_text(ctx, args.get("literature_id") or "")
@@ -568,18 +571,33 @@ def build_graph(ctx: RunContext):
                 new_messages.append(ToolMessage(content=text, tool_call_id=tcid))
 
             elif name == "propose_patch":
+                if terminal is not None:
+                    new_messages.append(ToolMessage(
+                        content=f"Error: only one terminal action (propose_patch/ask_user) per turn. Ignoring duplicate {name}.",
+                        tool_call_id=tcid
+                    ))
+                    continue
                 explanation = args.get("explanation") or ""
                 edits, eq_edits, appends = _split_edits(args.get("edits"))
                 terminal = {"kind": "patch", "explanation": explanation, "edits": edits, "eq_edits": eq_edits, "appends": appends}
                 new_messages.append(ToolMessage(content="Patch proposed. The user will review it. Stop now.", tool_call_id=tcid))
 
             elif name == "ask_user":
+                if terminal is not None:
+                    new_messages.append(ToolMessage(
+                        content=f"Error: only one terminal action (propose_patch/ask_user) per turn. Ignoring duplicate {name}.",
+                        tool_call_id=tcid
+                    ))
+                    continue
                 terminal = {"kind": "ask", "question": args.get("question") or "", "options": list(args.get("options") or [])}
                 new_messages.append(ToolMessage(content="Question asked. Stopping for the user.", tool_call_id=tcid))
 
             else:
                 new_messages.append(ToolMessage(content=f"Unknown tool: {name}", tool_call_id=tcid))
 
+        # Append deferred messages (e.g., vision images) after all ToolMessages
+        new_messages.extend(extra_messages)
+        
         delta = {"messages": new_messages, "steps": new_steps, "read_hits": read_hits}
         if terminal is not None:
             delta["terminal"] = terminal

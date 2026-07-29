@@ -1,1 +1,34 @@
+# Node modules
 frontend/node_modules
+
+# Build artifacts (generated, should not be tracked)
+frontend/build/
+backend/dist/
+backend/build/
+
+# Database files (local state)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Environment files (may contain secrets)
+.env
+.env.local
+
+# Python virtual environments
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

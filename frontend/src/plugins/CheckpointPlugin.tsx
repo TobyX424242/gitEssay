@@ -25,6 +25,25 @@ export default function CheckpointPlugin(): null {
   const [editor] = useLexicalComposerContext();
   const activeId = useActiveProjectId();
 
+  // Flush on page close/reload to prevent losing the debounce window.
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (!activeId) return;
+      // Synchronous capture — beforeunload handlers must complete before unload.
+      const state = editor.getEditorState();
+      const serialized = JSON.stringify(state.toJSON());
+      // Fire-and-forget fetch with keepalive so it completes even after unload.
+      void fetch(`/api/projects/${activeId}/checkpoints`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({source: 'auto', state: serialized}),
+        keepalive: true,
+      });
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [editor, activeId]);
+
   useEffect(() => {
     if (!activeId) {
       return;
@@ -75,6 +94,16 @@ export default function CheckpointPlugin(): null {
       unregister();
       if (timer) {
         clearTimeout(timer);
+      }
+      // Flush any pending edits before cleanup — project switch or unmount
+      // within the 3s debounce window would otherwise lose up to 3s of typing.
+      if (pendingContent) {
+        pendingContent = false;
+        void captureCheckpoint(editor, {
+          source: 'auto',
+          skipIfUnchanged: true,
+          projectId: activeId,
+        });
       }
     };
   }, [editor, activeId]);

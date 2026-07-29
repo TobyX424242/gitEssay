@@ -137,8 +137,8 @@ interface AgentEvent {
 
 function isAbort(err: unknown): boolean {
   return (
-    (err instanceof DOMException && err.name === 'AbortError') ||
-    (err instanceof Error && err.name === 'AbortError')
+    (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError')) ||
+    (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError'))
   );
 }
 

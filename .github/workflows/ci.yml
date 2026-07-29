@@ -45,4 +45,5 @@ jobs:
 
       - run: npm ci
       - run: npm test
+      - run: npm run typecheck:chat
       - run: npm run build
