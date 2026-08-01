@@ -8,6 +8,8 @@
 import {type JSX, useState} from 'react';
 import {createPortal} from 'react-dom';
 
+import useOverlayDismiss from '../hooks/useOverlayDismiss';
+
 import {
   type AISettings,
   type ProviderFormat,
@@ -27,6 +29,7 @@ export default function AISettingsPanel({
   onClose: () => void;
 }): JSX.Element {
   const current = useAISettings();
+  const dismiss = useOverlayDismiss(onClose);
   const [draft, setDraft] = useState<AISettings>(() => ({...current}));
   const [showKey, setShowKey] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(
@@ -89,7 +92,7 @@ export default function AISettingsPanel({
   const ready = !!draft.baseURL.trim() && !!draft.model.trim() && !!(draft.apiKey.trim() || draft.hasKey);
 
   return createPortal(
-    <div className="ai-overlay" onClick={onClose} role="presentation">
+    <div className="ai-overlay" role="presentation" {...dismiss}>
       <div
         className="ai-panel"
         role="dialog"

@@ -46,9 +46,21 @@ function PortalImpl({
         onClose();
       }
     };
+    // Close on outside click only when BOTH the press (mousedown) and the
+    // release (click) land outside the modal — pressing inside (e.g. selecting
+    // text in an input) and releasing past the edge must not close it.
+    let pressedOutside = false;
+    const mouseDownHandler = (event: MouseEvent) => {
+      const target = event.target;
+      pressedOutside =
+        modalRef.current !== null &&
+        isDOMNode(target) &&
+        !modalRef.current.contains(target);
+    };
     const clickOutsideHandler = (event: MouseEvent) => {
       const target = event.target;
       if (
+        pressedOutside &&
         modalRef.current !== null &&
         isDOMNode(target) &&
         !modalRef.current.contains(target) &&
@@ -56,11 +68,13 @@ function PortalImpl({
       ) {
         onClose();
       }
+      pressedOutside = false;
     };
     const modelElement = modalRef.current;
     if (modelElement !== null) {
       modalOverlayElement = modelElement.parentElement;
       if (modalOverlayElement !== null) {
+        modalOverlayElement.addEventListener('mousedown', mouseDownHandler);
         modalOverlayElement.addEventListener('click', clickOutsideHandler);
       }
     }
@@ -70,6 +84,7 @@ function PortalImpl({
     return () => {
       window.removeEventListener('keydown', handler);
       if (modalOverlayElement !== null) {
+        modalOverlayElement?.removeEventListener('mousedown', mouseDownHandler);
         modalOverlayElement?.removeEventListener('click', clickOutsideHandler);
       }
     };

@@ -16,6 +16,8 @@ import {
   useMemoryEnabled,
 } from './memories';
 
+import useOverlayDismiss from '../hooks/useOverlayDismiss';
+
 /** Group memory notes for the Memory panel: project-wide first, then one
  *  section per literature item (per-paper notes the agent saved). */
 function groupMemories(
@@ -54,6 +56,7 @@ export default function MemoryPanel({
   onClose: () => void;
 }): JSX.Element {
   const enabled = useMemoryEnabled();
+  const dismiss = useOverlayDismiss(onClose);
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -79,7 +82,7 @@ export default function MemoryPanel({
   };
 
   return (
-    <div className="mem-overlay" onClick={onClose}>
+    <div className="mem-overlay" {...dismiss}>
       <div
         className="mem-panel"
         role="dialog"

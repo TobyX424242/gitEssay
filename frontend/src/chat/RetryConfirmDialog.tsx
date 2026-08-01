@@ -10,6 +10,8 @@ import {createPortal} from 'react-dom';
 
 import type {PendingRetry} from './usePatchApply';
 
+import useOverlayDismiss from '../hooks/useOverlayDismiss';
+
 export default function RetryConfirmDialog({
   plan,
   confirmBtnRef,
@@ -21,8 +23,10 @@ export default function RetryConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }): JSX.Element {
+  const dismiss = useOverlayDismiss(onCancel);
+
   return createPortal(
-    <div className="ai-overlay" role="presentation" onClick={onCancel}>
+    <div className="ai-overlay" role="presentation" {...dismiss}>
       <div
         className="ai-panel retry-panel"
         role="dialog"

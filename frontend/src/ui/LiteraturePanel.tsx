@@ -11,6 +11,7 @@ import {type JSX, useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 
 import Markdown from '../chat/Markdown';
+import useOverlayDismiss from '../hooks/useOverlayDismiss';
 import {useActiveProjectId} from '../projects/projectStore';
 import {
   deleteLiterature,
@@ -118,6 +119,7 @@ function ConfidenceTag({lit}: {lit: Literature}): JSX.Element | null {
  * the settings/delete modals). Escape or backdrop click closes it. */
 function ConfidenceModal({lit, onClose}: {lit: Literature; onClose: () => void}): JSX.Element {
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  const dismiss = useOverlayDismiss(onClose);
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -143,7 +145,7 @@ function ConfidenceModal({lit, onClose}: {lit: Literature; onClose: () => void})
         ? 'docling — OCR fallback (slow path)'
         : null;
   return (
-    <div className="mem-overlay" onClick={onClose}>
+    <div className="mem-overlay" {...dismiss}>
       <div
         className="mem-panel lit-conf-modal"
         role="dialog"
@@ -403,6 +405,7 @@ function DeleteConfirmModal({
   onCancel: () => void;
 }): JSX.Element {
   const confirmRef = useRef<HTMLButtonElement | null>(null);
+  const dismiss = useOverlayDismiss(onCancel);
 
   // Escape cancels; focus the confirm button on open for keyboard users.
   useEffect(() => {
@@ -417,7 +420,7 @@ function DeleteConfirmModal({
   }, [onCancel]);
 
   return (
-    <div className="mem-overlay" onClick={onCancel}>
+    <div className="mem-overlay" {...dismiss}>
       <div
         className="mem-panel lit-confirm"
         role="alertdialog"
@@ -469,6 +472,7 @@ function LiteratureDetailModal({
   onClose: () => void;
 }): JSX.Element {
   const [detail, setDetail] = useState<LiteratureDetail | null>(null);
+  const dismiss = useOverlayDismiss(onClose);
   const [error, setError] = useState<string | null>(null);
   // Bumped to re-run the fetch+poll effect (e.g. after Regenerate — the poll
   // loop has already stopped by then, so without this the modal would show the
@@ -511,7 +515,7 @@ function LiteratureDetailModal({
   };
 
   return (
-    <div className="mem-overlay" onClick={onClose}>
+    <div className="mem-overlay" {...dismiss}>
       <div
         className="mem-panel lit-detail"
         role="dialog"
